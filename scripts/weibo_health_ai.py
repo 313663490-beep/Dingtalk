@@ -28,19 +28,22 @@ def get_weibo_hotspots():
 
 # ========== 2. 调用 AI 判断单条热搜是否为健康场景 ==========
 def is_health_topic(title):
-    """返回 True/False，以及 AI 给出的简短理由（可选）"""
-    prompt = f"""请判断以下微博热搜标题是否属于“健康/医疗/养生/疾病/公共卫生/食品安全/科学辟谣”等健康相关领域。
-只回答“是”或“否”，并在后面用一句话简要说明理由。
-标题：{title}"""
+    """调用 AI 判断单条热搜是否属于健康全场景（最宽松标准）"""
+    prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“健康全场景”。
+健康全场景包括一切可能直接或间接影响人类身心健康的话题，例如：
+疾病、症状、治疗、药物、疫苗、医院、医生、护士、中医、西医、心理、情绪、压力、抑郁、焦虑、失眠、减肥、健身、运动、饮食、营养、食品安全、保健品、养生、美容、护肤、整形、医美、生育、怀孕、育儿、月经、更年期、衰老、死亡、意外伤害、急救、康复、过敏、环境健康、空气污染、水污染、辐射、科普、辟谣（健康相关）、生活方式、习惯改变等。
+只要标题中含有以上任意一点关联，请回答“是”，否则回答“否”。
+标题：{title}
+请只回答一个字：是 或 否。"""
 
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "你是一个精确的健康领域分类器。"},
+            {"role": "system", "content": "你是一个健康全场景分类器，标准极其宽松。只输出是或否。"},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.0,
-        "max_tokens": 50,
+        "max_tokens": 10,
         "stream": False
     }
 
@@ -48,16 +51,16 @@ def is_health_topic(title):
         resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=15)
         if resp.status_code != 200:
             print(f"判断接口返回非200: {resp.status_code} {resp.text}")
-            return False, ""
+            return False
         answer = resp.json()['choices'][0]['message']['content'].strip()
-        # 解析回答
-        if answer.startswith('是'):
-            return True, answer
+        # 只要包含“是”就认定为健康
+        if "是" in answer:
+            return True
         else:
-            return False, answer
+            return False
     except Exception as e:
         print(f"判断“{title}”时出错: {e}")
-        return False, ""
+        return False
 
 # ========== 3. AI 生成最终摘要 ==========
 def generate_summary(health_list, time_str):
