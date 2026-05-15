@@ -25,6 +25,7 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
         run: |
+          pip install requests          #  ← 新加的这一行
           python -c "
           import requests, json, time, hmac, hashlib, base64, urllib.parse, os
 
