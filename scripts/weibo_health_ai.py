@@ -17,7 +17,6 @@ HEADERS = {
 # ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
     """使用微博官方公开接口获取热搜榜"""
-    # 微博官方接口，有时效性，但通常稳定
     api_url = "https://weibo.com/ajax/statuses/hot_band"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -28,21 +27,25 @@ def get_weibo_hotspots():
         resp.raise_for_status()
         data = resp.json()
         
-        # 微博返回格式: {"data": {"band_list": [{"word": "话题", "num": 热度值, ...}]}}
         if 'data' in data and 'band_list' in data['data']:
             band_list = data['data']['band_list']
+            # 尝试获取热榜的实际更新时间
+            star_word = data['data'].get('star_word', {})
+            update_time = star_word.get('update_time', '')
+            if update_time:
+                time_str = update_time  # 格式如 "2026-05-15 12:00"
+            else:
+                time_str = f"系统时间 {time.strftime('%Y-%m-%d %H:%M:%S')}"
+            
             formatted_list = []
-            # 使用 enumerate 生成正确的排名，start=1 表示从1开始计数
             for idx, item in enumerate(band_list, start=1):
-                # 提取标题，如果'word'不存在则设为'无标题'
                 title = item.get('word', '无标题')
                 formatted_list.append({
                     'title': title,
-                    'rank': idx,          # 核心修复：使用 enumerate 生成的索引作为排名
+                    'rank': idx,
                     'url': f'https://s.weibo.com/weibo?q={title}'
                 })
-            print(f"成功从微博官方接口获取到 {len(formatted_list)} 条热搜")
-            time_str = time.strftime('%Y-%m-%d %H:%M:%S')
+            print(f"成功从微博官方接口获取到 {len(formatted_list)} 条热搜，热榜时间：{time_str}")
             return formatted_list, time_str
         else:
             print(f"微博接口返回数据格式错误: {data}")
@@ -53,19 +56,20 @@ def get_weibo_hotspots():
 
 # ==================== 2. AI判断是否健康话题 ====================
 def is_health_topic(title):
-    """严格判断，但允许明星关联的具体疾病/医疗事件"""
+    """严格判断，但明星关联的具体疾病/医疗事件必须纳入"""
     prompt = f"""请判断以下微博热搜标题是否属于“健康/医疗/疾病/公共卫生”领域。
-重要规则：
-- 标题如果包含具体疾病（如败血症、癌症、高血压）、症状、治疗、药物、医院、疫苗、食品安全、公共卫生、科学辟谣(健康)、严重心理疾病等，哪怕提到了明星或其他公众人物，也必须判定为健康话题。例如：“温岚因败血症进入ICU” → 是；“某某患抑郁症” → 是；“某某膝盖手术成功” → 是。
-- 标题如果仅涉及明星外貌、身材、穿搭、综艺搞笑、纯情感抒发、演出延期等，与具体健康问题无关，则判定为非健康。
-- 情绪心理类：明确指向心理疾病（如抑郁症、焦虑症）或专业心理援助的，算健康；仅表达一时情绪波动（如“一会想通了一会又想不通”）不算。
+绝对规则：
+- 标题中如果直接出现以下词汇中的任意一个：ICU、重症监护室、住院、抢救、手术、治疗、出院、诊断、疫苗、感染、中毒、流行病、食品安全、公共卫生，则必须判定为健康话题。例如：“温岚在ICU接受治疗” → 是。
+- 如果标题包含具体疾病名称（如败血症、糖尿病、抑郁症、癌症），即使与明星相关，也必须判定为健康。例如：“某某因抑郁症停工” → 是。
+- 标题如果仅涉及明星外貌、身材、穿搭、综艺搞笑、演出延期、纯情感抒发，与具体健康问题无关，则判定为非健康。
+- 情绪类：如果标题只是表达一时情绪（如“一会想通了一会又想不通”），不算健康；如果指向严重心理疾病（如抑郁症、焦虑症）或自杀干预，算健康。
 标题：{title}
 请只回答一个字：是 或 否。"""
 
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "你是一个健康话题过滤器，严格按规则只输出是或否。"},
+            {"role": "system", "content": "你是一个严格但遵循规则的健康话题过滤器，只输出是或否。"},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.0,
