@@ -2,10 +2,15 @@ name: 转发 Issue 内容到钉钉
 
 on:
   issues:
-    types: [opened]  # 只在新建 Issue 时触发
+    types: [opened]                # 保留：新建 Issue 时触发
+  schedule:
+    - cron: '0 1 * * *'            # 新增：每天 UTC 1:00（北京时间 9:00）执行
+  workflow_dispatch:                # 新增：允许手动测试健康热搜功能
 
 jobs:
+  # ========== 原有任务：Issue 转发（增加条件判断，避免误触发） ==========
   send-to-dingtalk:
+    if: github.event_name == 'issues'   # 仅在 Issue 事件时运行
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码（可选，本例未使用）
@@ -25,7 +30,7 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
         run: |
-          pip install requests          #  ← 新加的这一行
+          pip install requests
           python -c "
           import requests, json, time, hmac, hashlib, base64, urllib.parse, os
 
@@ -56,3 +61,23 @@ jobs:
           })
           print(resp.json())
           "
+
+  # ========== 新增任务：每日健康热搜 AI 总结 ==========
+  health-summary:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: pip install requests
+      - name: 执行抓取与总结脚本
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          APIBOX_ID: ${{ secrets.APIBOX_ID }}
+          APIBOX_KEY: ${{ secrets.APIBOX_KEY }}
+          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+        run: python scripts/weibo_health_ai.py
