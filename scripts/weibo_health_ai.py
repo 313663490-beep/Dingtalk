@@ -30,7 +30,8 @@ def summarize_with_ai(hotspots, time_str):
     '食品', '安全', '添加剂', '致癌',
     '体检', '血压', '血糖', '心脏',
     '癌症', '肿瘤', '白血病',
-    '科普', '辟谣'   # 很多健康科普辟谣也会上热搜
+    '科普', '辟谣' 
+    ]  # 很多健康科普辟谣也会上热搜
     health_hotspots = [h for h in hotspots if any(kw in h.get('title', '') for kw in health_keywords)]
 
     if not health_hotspots:
