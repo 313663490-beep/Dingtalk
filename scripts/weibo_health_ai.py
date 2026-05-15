@@ -20,7 +20,17 @@ def get_weibo_hotspots():
 
 # --- 2. 筛选健康内容并生成AI摘要 ---
 def summarize_with_ai(hotspots, time_str):
-    health_keywords = ['健康', '医疗', '医生', '疫情', '中医', '减肥', '睡眠', '养生', '食品安全', '疫苗', '体检', '癌症']
+    health_keywords =health_keywords = [
+    '健康', '医疗', '医生', '医院', '护士', '药',
+    '疫情', '病毒', '流感', '发烧', '咳嗽',
+    '中医', '中药', '针灸', '把脉',
+    '减肥', '健身', '运动', '跑步', '瑜伽',
+    '睡眠', '失眠', '熬夜',
+    '养生', '保健品', '维生素',
+    '食品', '安全', '添加剂', '致癌',
+    '体检', '血压', '血糖', '心脏',
+    '癌症', '肿瘤', '白血病',
+    '科普', '辟谣'   # 很多健康科普辟谣也会上热搜
     health_hotspots = [h for h in hotspots if any(kw in h.get('title', '') for kw in health_keywords)]
 
     if not health_hotspots:
@@ -120,6 +130,10 @@ if __name__ == "__main__":
             else:
                 print("错误: 未配置DINGTALK_WEBHOOK环境变量！")
         else:
-            print("未生成AI摘要。")
+    print("未生成AI摘要，发送提示消息。")
+    webhook_url = os.environ.get('DINGTALK_WEBHOOK')
+    secret = os.environ.get('DINGTALK_SECRET')
+    if webhook_url and secret:
+        send_to_dingtalk(webhook_url, secret, "每日健康热搜", "今日微博热榜暂无匹配的健康话题。")
     else:
         print("未能获取热搜数据，任务结束。")
