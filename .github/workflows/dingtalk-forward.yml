@@ -2,10 +2,10 @@ name: 转发 Issue 内容到钉钉
 
 on:
   issues:
-    types: [opened]                # 保留：新建 Issue 时触发
+    types: [opened]
   schedule:
-    - cron: '* * * * *'   # 每分钟运行一次（UTC 时间）         # 每20分钟运行一次（UTC 时间）
-  workflow_dispatch:               # 允许手动测试
+    - cron: '* * * * *'   # 每分钟一次（UTC）
+  workflow_dispatch:  # 允许手动测试
 
 jobs:
   # ========== 原有任务：Issue 转发 ==========
@@ -92,3 +92,4 @@ jobs:
           key: sent-topics-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             sent-topics-${{ runner.os }}-
+# refresh schedule
