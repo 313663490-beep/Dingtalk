@@ -70,11 +70,32 @@ def summarize_with_ai(hotspots, time_str):
         return None, None, health_hotspots
 
 # --- 3. 推送到钉钉机器人 ---
-def send_to_dingtalk(webhook_url, title, text):
+def send_to_dingtalk(webhook_url, secret, title, text):
     timestamp = str(round(time.time() * 1000))
-    secret = os.environ.get('DINGTALK_SECRET') # 假设你的钉钉密钥存在这个Secret中
-    if not secret:
-        print("错误: 未找到DINGTALK_SECRET")
+    secret_enc = secret.encode('utf-8')
+    string_to_sign = f'{timestamp}\n{secret}'
+    hmac_code = hmac.new(secret_enc, string_to_sign.encode('utf-8'), hashlib.sha256).digest()
+    sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
+    webhook_url = f'{webhook_url}&timestamp={timestamp}&sign={sign}'
+
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "msgtype": "markdown",
+        "markdown": {
+            "title": title,
+            "text": text
+        }
+    }
+    try:
+        response = requests.post(webhook_url, headers=headers, json=data)
+        if response.json().get('errcode') == 0:
+            print("钉钉消息发送成功！")
+            return True
+        else:
+            print(f"钉钉消息发送失败: {response.text}")
+            return False
+    except Exception as e:
+        print(f"钉钉发送异常: {e}")
         return False
 
     secret_enc = secret.encode('utf-8')
