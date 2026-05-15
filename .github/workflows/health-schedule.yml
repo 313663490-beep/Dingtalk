@@ -1,0 +1,39 @@
+name: 微博健康热搜定时播报
+
+on:
+  schedule:
+    - cron: '* * * * *'   # 每分钟一次（测试用，之后记得改回 */20 * * * *）
+  workflow_dispatch:      # 保留手动触发方便调试
+
+jobs:
+  health-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 恢复去重缓存
+        uses: actions/cache@v4
+        with:
+          path: sent_topics.json
+          key: sent-topics-${{ runner.os }}
+
+      - name: 执行抓取与总结脚本
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+        run: python scripts/weibo_health_ai.py
+
+      - name: 保存去重缓存
+        if: success()
+        uses: actions/cache@v4
+        with:
+          path: sent_topics.json
+          key: sent-topics-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            sent-topics-${{ runner.os }}-
