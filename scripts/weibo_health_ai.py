@@ -8,7 +8,7 @@ HEADERS = {
 }
 
 def get_weibo_hotspots():
-    api_url = "http://101.35.2.25/api/xinwen/weibo2.php"
+    api_url = "http://101.34.207.105/api/xinwen/weibo.php"
     params = {
         "id": os.environ.get('APIBOX_ID'),
         "key": os.environ.get('APIBOX_KEY')
