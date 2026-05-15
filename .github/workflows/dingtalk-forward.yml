@@ -2,10 +2,7 @@ name: 转发 Issue 内容到钉钉
 
 on:
   issues:
-    types: [opened]
-  schedule:
-    - cron: '* * * * *'   # 每分钟一次（UTC）
-  workflow_dispatch:  # 允许手动测试
+    types: [opened] # 这个手动触发会执行 health-summary，可保留可不保留，建议删掉以免混淆
 
 jobs:
   # ========== 原有任务：Issue 转发 ==========
