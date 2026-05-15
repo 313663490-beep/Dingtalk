@@ -1,0 +1,57 @@
+name: 转发 Issue 内容到钉钉
+
+on:
+  issues:
+    types: [opened]  # 只在新建 Issue 时触发
+
+jobs:
+  send-to-dingtalk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码（可选，本例未使用）
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 发送钉钉消息
+        env:
+          WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK }}
+          SECRET: ${{ secrets.DINGTALK_SECRET }}
+          # GitHub 自动将 Issue 信息注入环境变量
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          python -c "
+          import requests, json, time, hmac, hashlib, base64, urllib.parse, os
+
+          webhook = os.environ['WEBHOOK_URL']
+          secret = os.environ['SECRET']
+          title = os.environ['ISSUE_TITLE']
+          body = os.environ['ISSUE_BODY']
+          url = os.environ['ISSUE_URL']
+
+          # 1. 计算加签
+          timestamp = str(round(time.time() * 1000))
+          secret_enc = secret.encode()
+          string_to_sign = f'{timestamp}\n{secret}'
+          hmac_code = hmac.new(secret_enc, string_to_sign.encode(), hashlib.sha256).digest()
+          sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
+          webhook = f'{webhook}&timestamp={timestamp}&sign={sign}'
+
+          # 2. 组装消息内容：标题 + 链接 + 正文
+          content = f'📢 新消息\n**{title}**\n{body}\n\n[查看详情]({url})'
+
+          # 3. 发送
+          resp = requests.post(webhook, json={
+              'msgtype': 'markdown',
+              'markdown': {
+                  'title': title,
+                  'text': content
+              }
+          })
+          print(resp.json())
+          "
