@@ -16,8 +16,8 @@ HEADERS = {
 
 # ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
-    """使用微博官方公开接口获取热搜榜"""
-    api_url = "https://weibo.com/ajax/statuses/hot_band"
+    """使用微博官方公开接口获取热搜榜，并解析真实时间"""
+    api_url = "https://weibo.com/ajax/side/hotSearch"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         "Referer": "https://weibo.com/"
@@ -27,31 +27,50 @@ def get_weibo_hotspots():
         resp.raise_for_status()
         data = resp.json()
         
-        if 'data' in data and 'band_list' in data['data']:
-            band_list = data['data']['band_list']
-            # 尝试获取热榜的实际更新时间
+        if 'data' in data and 'realtime' in data['data']:
+            realtime_list = data['data']['realtime']
+            
+            # 1. 优先获取真实时间戳
+            time_str = ""
+            # 尝试从 data['data']['star_word'] 获取 update_time (你之前的方案)
             star_word = data['data'].get('star_word', {})
             update_time = star_word.get('update_time', '')
             if update_time:
-                time_str = update_time  # 格式如 "2026-05-15 12:00"
+                time_str = update_time
             else:
-                time_str = f"系统时间 {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                # 方案B: 从 data['data']['timestamp'] 获取 (如果有)
+                ts = data['data'].get('timestamp', 0)
+                if ts:
+                    time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
+                else:
+                    # 方案C: 从第一条数据的 'onboard_time' 转换
+                    if realtime_list and 'onboard_time' in realtime_list[0]:
+                        ts = realtime_list[0]['onboard_time']
+                        time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
+                    else:
+                        # 最终方案：使用当前时间
+                        time_str = f"系统时间 {time.strftime('%Y-%m-%d %H:%M:%S')}"
             
             formatted_list = []
-            for idx, item in enumerate(band_list, start=1):
-                title = item.get('word', '无标题')
+            for idx, item in enumerate(realtime_list, start=1):
+                # 兼容不同的字段名
+                title = item.get('word') or item.get('note') or item.get('title', '无标题')
+                # 构建链接
+                url = item.get('url', '')
+                if not url:
+                    url = f'https://s.weibo.com/weibo?q={title}'
                 formatted_list.append({
                     'title': title,
                     'rank': idx,
-                    'url': f'https://s.weibo.com/weibo?q={title}'
+                    'url': url
                 })
-            print(f"成功从微博官方接口获取到 {len(formatted_list)} 条热搜，热榜时间：{time_str}")
+            print(f"成功获取 {len(formatted_list)} 条热搜，时间：{time_str}")
             return formatted_list, time_str
         else:
-            print(f"微博接口返回数据格式错误: {data}")
+            print(f"接口返回数据格式错误: {data}")
             return [], None
     except Exception as e:
-        print(f"从微博官方接口获取热搜失败: {e}")
+        print(f"获取热搜失败: {e}")
         return [], None
 
 # ==================== 2. AI判断是否健康话题 ====================
