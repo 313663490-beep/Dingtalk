@@ -20,7 +20,7 @@ def get_weibo_hotspots():
 
 # --- 2. 筛选健康内容并生成AI摘要 ---
 def summarize_with_ai(hotspots, time_str):
-    health_keywords =health_keywords = [
+    health_keywords =[
     '健康', '医疗', '医生', '医院', '护士', '药',
     '疫情', '病毒', '流感', '发烧', '咳嗽',
     '中医', '中药', '针灸', '把脉',
