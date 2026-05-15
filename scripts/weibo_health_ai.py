@@ -203,7 +203,7 @@ if __name__ == "__main__":
             summary = generate_single_summary(title)
             messages.append(f"话题：{title}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
 
-        full_text = f"## 微博健康热搜播报\n**数据时间：{time_str}**\n\n" + "\n".join(messages)
+        full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
         send_to_dingtalk(webhook_url, secret, "每日健康热搜", full_text)
     else:
         print("今日无健康热搜，不发送消息。")
