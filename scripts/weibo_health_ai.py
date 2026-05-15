@@ -131,10 +131,10 @@ if __name__ == "__main__":
             else:
                 print("错误: 未配置DINGTALK_WEBHOOK环境变量！")
         else:
-    print("未生成AI摘要，发送提示消息。")
-    webhook_url = os.environ.get('DINGTALK_WEBHOOK')
-    secret = os.environ.get('DINGTALK_SECRET')
-    if webhook_url and secret:
-        send_to_dingtalk(webhook_url, secret, "每日健康热搜", "今日微博热榜暂无匹配的健康话题。")
+            print("未生成AI摘要，发送提示消息。")
+            webhook_url = os.environ.get('DINGTALK_WEBHOOK')
+            secret = os.environ.get('DINGTALK_SECRET')
+            if webhook_url and secret:
+                send_to_dingtalk(webhook_url, secret, "每日健康热搜", "今日微博热榜暂无匹配的健康话题。")
     else:
         print("未能获取热搜数据，任务结束。")
