@@ -10,7 +10,7 @@ HEADERS = {
 
 # ========== 1. 获取热搜 ==========
 def get_weibo_hotspots():
-    api_url = "https://cn.apihz.cn/api/xinwen/weibo2.php"
+    api_url = "http://101.35.2.25/api/xinwen/weibo2.php"
     params = {
         "id": os.environ.get('APIBOX_ID'),
         "key": os.environ.get('APIBOX_KEY')
