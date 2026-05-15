@@ -191,7 +191,8 @@ if __name__ == "__main__":
         last_titles = load_sent_topics()
 
         if current_titles == last_titles:
-            print("健康热搜列表与上次完全相同，跳过发送。")
+            print("健康热搜列表与上次完全相同，发送提示消息。")
+            send_to_dingtalk(webhook_url, secret, "健康热搜", "暂时没最新消息，等待下次更新。")
         else:
             messages = []
             for item in health_list:
