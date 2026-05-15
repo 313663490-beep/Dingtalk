@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import base64
 import urllib.parse
+import json
 
 # ==================== 配置 ====================
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
@@ -14,9 +15,25 @@ HEADERS = {
     "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
 }
 
-# ==================== 1. 获取微博热搜 ====================
+CACHE_FILE = "sent_topics.json"
+
+def load_sent_topics():
+    """读取上次发送的话题列表"""
+    try:
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return set(data.get('topics', []))
+    except FileNotFoundError:
+        return set()
+
+def save_sent_topics(topics):
+    """保存本次发送的话题列表"""
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump({'topics': list(topics)}, f)
+
+# ==================== 1. 获取微博热搜 (微博官方接口) ====================
 def get_weibo_hotspots():
-    """使用微博官方公开接口获取热搜榜，并解析真实时间"""
+    """使用微博官方公开接口获取热搜榜（不获取时间）"""
     api_url = "https://weibo.com/ajax/side/hotSearch"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -29,33 +46,11 @@ def get_weibo_hotspots():
         
         if 'data' in data and 'realtime' in data['data']:
             realtime_list = data['data']['realtime']
-            
-            # 1. 优先获取真实时间戳
-            time_str = ""
-            # 尝试从 data['data']['star_word'] 获取 update_time (你之前的方案)
-            star_word = data['data'].get('star_word', {})
-            update_time = star_word.get('update_time', '')
-            if update_time:
-                time_str = update_time
-            else:
-                # 方案B: 从 data['data']['timestamp'] 获取 (如果有)
-                ts = data['data'].get('timestamp', 0)
-                if ts:
-                    time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
-                else:
-                    # 方案C: 从第一条数据的 'onboard_time' 转换
-                    if realtime_list and 'onboard_time' in realtime_list[0]:
-                        ts = realtime_list[0]['onboard_time']
-                        time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
-                    else:
-                        # 最终方案：使用当前时间
-                        time_str = f"系统时间 {time.strftime('%Y-%m-%d %H:%M:%S')}"
-            
             formatted_list = []
             for idx, item in enumerate(realtime_list, start=1):
-                # 兼容不同的字段名
+                # 兼容不同字段名
                 title = item.get('word') or item.get('note') or item.get('title', '无标题')
-                # 构建链接
+                # 优先用接口返回的链接
                 url = item.get('url', '')
                 if not url:
                     url = f'https://s.weibo.com/weibo?q={title}'
@@ -64,14 +59,14 @@ def get_weibo_hotspots():
                     'rank': idx,
                     'url': url
                 })
-            print(f"成功获取 {len(formatted_list)} 条热搜，时间：{time_str}")
-            return formatted_list, time_str
+            print(f"成功获取 {len(formatted_list)} 条热搜")
+            return formatted_list
         else:
             print(f"接口返回数据格式错误: {data}")
-            return [], None
+            return []
     except Exception as e:
         print(f"获取热搜失败: {e}")
-        return [], None
+        return []
 
 # ==================== 2. AI判断是否健康话题 ====================
 def is_health_topic(title):
@@ -163,8 +158,8 @@ def send_to_dingtalk(webhook_url, secret, title, text):
 
 # ==================== 主程序 ====================
 if __name__ == "__main__":
-    print("开始执行严格健康热搜筛选...")
-    hotspots, time_str = get_weibo_hotspots()
+    print("开始健康热搜筛选与去重播报...")
+    hotspots = get_weibo_hotspots()
 
     if not hotspots:
         print("未获取到热搜数据，退出。")
@@ -192,18 +187,25 @@ if __name__ == "__main__":
         exit(1)
 
     if health_list:
-        messages = []
-        for item in health_list:
-            rank = item.get('rank', '?')
-            title = item['title']
-            # 生成带排名的微博搜索链接
-            weibo_query = urllib.parse.quote(title)
-            link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
-            
-            summary = generate_single_summary(title)
-            messages.append(f"话题：{title}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
+        current_titles = set(item['title'] for item in health_list)
+        last_titles = load_sent_topics()
 
-        full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
-        send_to_dingtalk(webhook_url, secret, "每日健康热搜", full_text)
+        if current_titles == last_titles:
+            print("健康热搜列表与上次完全相同，跳过发送。")
+        else:
+            messages = []
+            for item in health_list:
+                rank = item.get('rank', '?')
+                title = item['title']
+                weibo_query = urllib.parse.quote(title)
+                link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
+                summary = generate_single_summary(title)
+                messages.append(f"话题：{title}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
+
+            full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
+            send_to_dingtalk(webhook_url, secret, "健康热搜", full_text)
+            # 发送成功后更新缓存
+            save_sent_topics(current_titles)
+            print("已更新去重缓存。")
     else:
         print("今日无健康热搜，不发送消息。")
