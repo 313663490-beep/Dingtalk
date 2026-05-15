@@ -4,28 +4,25 @@ on:
   issues:
     types: [opened]                # 保留：新建 Issue 时触发
   schedule:
-    - cron: '0 1 * * *'            # 新增：每天 UTC 1:00（北京时间 9:00）执行
-  workflow_dispatch:                # 新增：允许手动测试健康热搜功能
+    - cron: '*/20 * * * *'         # 每20分钟运行一次（UTC 时间）
+  workflow_dispatch:               # 允许手动测试
 
 jobs:
-  # ========== 原有任务：Issue 转发（增加条件判断，避免误触发） ==========
+  # ========== 原有任务：Issue 转发 ==========
   send-to-dingtalk:
-    if: github.event_name == 'issues'   # 仅在 Issue 事件时运行
+    if: github.event_name == 'issues'
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码（可选，本例未使用）
+      - name: 检出代码
         uses: actions/checkout@v4
-
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: 发送钉钉消息
         env:
           WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK }}
           SECRET: ${{ secrets.DINGTALK_SECRET }}
-          # GitHub 自动将 Issue 信息注入环境变量
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
@@ -40,7 +37,6 @@ jobs:
           body = os.environ['ISSUE_BODY']
           url = os.environ['ISSUE_URL']
 
-          # 1. 计算加签
           timestamp = str(round(time.time() * 1000))
           secret_enc = secret.encode()
           string_to_sign = f'{timestamp}\n{secret}'
@@ -48,10 +44,8 @@ jobs:
           sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
           webhook = f'{webhook}&timestamp={timestamp}&sign={sign}'
 
-          # 2. 组装消息内容：标题 + 链接 + 正文
           content = f'📢 新消息\n**{title}**\n{body}\n\n[查看详情]({url})'
 
-          # 3. 发送
           resp = requests.post(webhook, json={
               'msgtype': 'markdown',
               'markdown': {
@@ -62,7 +56,7 @@ jobs:
           print(resp.json())
           "
 
-  # ========== 新增任务：每日健康热搜 AI 总结 ==========
+  # ========== 新增任务：健康热搜定时播报（带去重） ==========
   health-summary:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -73,11 +67,28 @@ jobs:
           python-version: '3.11'
       - name: 安装依赖
         run: pip install requests
+
+      # 恢复上次发送的话题缓存
+      - name: 恢复去重缓存
+        uses: actions/cache@v4
+        with:
+          path: sent_topics.json
+          key: sent-topics-${{ runner.os }}
+
+      # 执行脚本
       - name: 执行抓取与总结脚本
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          APIBOX_ID: ${{ secrets.APIBOX_ID }}
-          APIBOX_KEY: ${{ secrets.APIBOX_KEY }}
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
         run: python scripts/weibo_health_ai.py
+
+      # 保存本次发送的话题缓存（仅在脚本成功时保存）
+      - name: 保存去重缓存
+        if: success()
+        uses: actions/cache@v4
+        with:
+          path: sent_topics.json
+          key: sent-topics-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            sent-topics-${{ runner.os }}-
