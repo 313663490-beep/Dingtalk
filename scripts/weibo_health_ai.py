@@ -14,9 +14,9 @@ HEADERS = {
     "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
 }
 
-# ==================== 1. 获取微博热搜 (夏柔API) ====================
+# ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
-    """使用微博官方公开接口获取热搜榜 (备选方案)"""
+    """使用微博官方公开接口获取热搜榜"""
     # 微博官方接口，有时效性，但通常稳定
     api_url = "https://weibo.com/ajax/statuses/hot_band"
     headers = {
@@ -28,17 +28,18 @@ def get_weibo_hotspots():
         resp.raise_for_status()
         data = resp.json()
         
-        # 微博返回格式: {"data": {"band_list": [{"word": "话题", "num": 排名, ...}]}}
+        # 微博返回格式: {"data": {"band_list": [{"word": "话题", "num": 热度值, ...}]}}
         if 'data' in data and 'band_list' in data['data']:
             band_list = data['data']['band_list']
-            # 格式化数据，使其与后续处理逻辑兼容
             formatted_list = []
-            for item in band_list:
+            # 使用 enumerate 生成正确的排名，start=1 表示从1开始计数
+            for idx, item in enumerate(band_list, start=1):
+                # 提取标题，如果'word'不存在则设为'无标题'
+                title = item.get('word', '无标题')
                 formatted_list.append({
-                    'title': item.get('word', '无标题'),
-                    'index': item.get('num', 0),
-                    'rank': item.get('num', 0),
-                    'url': f'https://s.weibo.com/weibo?q={item.get("word", "")}'
+                    'title': title,
+                    'rank': idx,          # 核心修复：使用 enumerate 生成的索引作为排名
+                    'url': f'https://s.weibo.com/weibo?q={title}'
                 })
             print(f"成功从微博官方接口获取到 {len(formatted_list)} 条热搜")
             time_str = time.strftime('%Y-%m-%d %H:%M:%S')
