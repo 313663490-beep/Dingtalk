@@ -1,8 +1,6 @@
 name: 微博健康热搜定时播报-群2
 
 on:
-  schedule:
-    - cron: '*/20 * * * *'   # 与群1保持一致，或按需调整
   workflow_dispatch:          # 允许手动触发
 
 jobs:
