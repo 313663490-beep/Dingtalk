@@ -2,8 +2,8 @@ name: 微博健康热搜定时播报-群2
 
 on:
   schedule:
-    - cron: '*/20 * * * *'   # 可独立设置频率，如果一样就保持和原来相同
-  workflow_dispatch:
+    - cron: '*/20 * * * *'   # 与群1保持一致，或按需调整
+  workflow_dispatch:          # 允许手动触发
 
 jobs:
   health-summary:
@@ -16,24 +16,26 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
+      # 恢复群2的去重缓存（独立 key）
       - name: 恢复去重缓存
         uses: actions/cache@v4
         with:
           path: sent_topics.json
-          key: sent-topics-group2-${{ runner.os }}   # 缓存键也要加后缀，避免与群1冲突
+          key: sent-topics-group2-Linux
+          restore-keys: sent-topics-group2-Linux
 
+      # 执行脚本（使用群2的钉钉凭证）
       - name: 执行抓取与总结脚本
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK_GROUP2 }}   # 修改这里
-          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET_GROUP2 }}     # 修改这里
+          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK_GROUP2 }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET_GROUP2 }}
         run: python scripts/weibo_health_ai.py
 
+      # 保存群2的去重缓存
       - name: 保存去重缓存
         if: success()
         uses: actions/cache@v4
         with:
           path: sent_topics.json
-          key: sent-topics-group2-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            sent-topics-group2-${{ runner.os }}-
+          key: sent-topics-group2-Linux
