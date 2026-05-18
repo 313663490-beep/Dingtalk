@@ -34,6 +34,51 @@ def save_sent_topics(topics):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump({'topics': list(topics)}, f, ensure_ascii=False)
 
+def is_duplicate_topic(new_title, sent_titles_list):
+    """
+    调用AI判断新标题是否与已发送列表中的任何一个标题语义重复。
+    如果重复，返回 True。
+    """
+    if not sent_titles_list:
+        return False
+
+    # 如果精确匹配，直接返回重复
+    if new_title in sent_titles_list:
+        return True
+
+    sent_titles_str = "\n".join([f"- {t}" for t in sent_titles_list])
+    prompt = f"""请判断以下“新标题”是否与“已发送列表”中的任何一个标题在**语义上完全相同或高度相似**（比如指向同一个核心事件、同一个健康话题）：
+    
+已发送列表：
+{sent_titles_str}
+
+新标题：{new_title}
+
+如果新标题与列表中任何一个标题高度相似，请直接回答“重复”；如果完全不同，请回答“不重复”。
+请只回答两个字：重复 或 不重复。"""
+
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "你是一个精确的话题去重器，只输出重复或不重复。"},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 10,
+        "stream": False
+    }
+    try:
+        resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=10)
+        if resp.status_code != 200:
+            print(f"去重接口异常 {resp.status_code}: {resp.text}")
+            return False  # 网络错误时，不认为是重复，宁滥勿缺
+        answer = resp.json()['choices'][0]['message']['content'].strip()
+        print(f"语义去重判断: 新标题 \"{new_title}\" → {answer}")
+        return "重复" in answer
+    except Exception as e:
+        print(f"语义去重异常: {e}")
+        return False
+
 # ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
     """使用微博官方公开接口获取热搜榜"""
@@ -52,7 +97,6 @@ def get_weibo_hotspots():
             formatted_list = []
             for idx, item in enumerate(realtime_list, start=1):
                 raw_title = item.get('word') or item.get('note') or item.get('title', '无标题')
-                # 标题标准化：去除首尾空格，合并多个连续空格
                 title = ' '.join(raw_title.split())
                 url = item.get('url', '')
                 if not url:
@@ -73,7 +117,7 @@ def get_weibo_hotspots():
 
 # ==================== 2. AI判断是否健康话题 ====================
 def is_health_topic(title):
-    """宽松判断，覆盖全健康场景，包括自然灾害、应急医疗等"""
+    """宽松判断，覆盖全健康场景"""
     prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“健康全场景”。
 健康全场景包括但不限于：
 - 疾病、症状、治疗、药物、疫苗、医院、ICU、住院、手术、抢救、诊断、感染、中毒、过敏、流行病、食品安全、公共卫生。
@@ -119,10 +163,10 @@ def generate_professional_summaries(health_list):
     """为每条热搜生成专业话题名称和概述"""
     items_text = "\n".join([f"{item['rank']}. {item['title']}" for item in health_list])
     prompt = f"""你是专业健康信息分析师。为下列每条热搜生成：
-1. 专业话题名称（概括核心健康议题，如“地震灾害与应急医疗响应”，不要直接使用原标题）
+1. 专业话题名称（概括核心健康议题，不要直接使用原标题）
 2. 一句专业概述（聚焦健康风险或医疗要点，100字以内）
 
-请严格按以下格式输出，每条一行，共{len(health_list)}行，不要添加任何额外解释：
+请严格按以下格式输出，每条一行，共{len(health_list)}行：
 排名. 话题：... | 概述：...
 
 输入示例：
@@ -138,7 +182,7 @@ def generate_professional_summaries(health_list):
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "你是一位专业健康信息分析师，只输出指定格式，不要多说一个字。"},
+            {"role": "system", "content": "你是一位专业健康信息分析师，只输出指定格式。"},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.3,
@@ -162,7 +206,6 @@ def generate_professional_summaries(health_list):
                         continue
                     topic_part = parts[0].split('话题：')[1].strip()
                     summary_part = parts[1].split('概述：')[1].strip()
-                    # 找到对应排名的热搜
                     for item in health_list:
                         if item['rank'] == rank:
                             item_copy = item.copy()
@@ -212,7 +255,7 @@ def send_to_dingtalk(webhook_url, secret, title, text):
 
 # ==================== 主程序 ====================
 if __name__ == "__main__":
-    print("开始健康热搜筛选与增量去重...")
+    print("开始健康热搜筛选与语义去重...")
     hotspots = get_weibo_hotspots()
     if not hotspots:
         print("未获取到热搜数据，退出。")
@@ -232,7 +275,7 @@ if __name__ == "__main__":
 
     print(f"共筛选出 {len(health_list)} 条健康热搜")
 
-    # 读取多个群的钉钉凭证（用逗号分隔，一一对应）
+    # 读取多个群的钉钉凭证
     webhooks_str = os.environ.get('DINGTALK_WEBHOOKS', '')
     secrets_str = os.environ.get('DINGTALK_SECRETS', '')
     webhooks = [w.strip() for w in webhooks_str.split(',') if w.strip()]
@@ -243,15 +286,21 @@ if __name__ == "__main__":
         exit(1)
 
     if health_list:
-        # 再次标准化标题（确保去重准确）
         for item in health_list:
             item['title'] = ' '.join(item['title'].split())
 
         current_titles = set(item['title'] for item in health_list)
         last_titles = load_sent_topics()
 
-        # 增量去重：只保留上次没出现过的新热搜
-        new_health_list = [item for item in health_list if item['title'] not in last_titles]
+        # 语义去重：使用AI判断，过滤掉与已发送列表中语义重复的话题
+        sent_titles_list = list(last_titles)  # 初始已发送列表
+        new_health_list = []
+        for item in health_list:
+            if not is_duplicate_topic(item['title'], sent_titles_list):
+                new_health_list.append(item)
+                sent_titles_list.append(item['title'])  # 避免本次运行内重复
+            else:
+                print(f"语义去重：过滤掉重复话题 \"{item['title']}\"")
 
         if not new_health_list:
             print("没有新增健康热搜，发送提示消息给所有群。")
@@ -272,7 +321,6 @@ if __name__ == "__main__":
                     messages.append(f"话题：{topic}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             else:
-                # 回退方案：使用原始标题
                 messages = []
                 for item in new_health_list:
                     rank = item.get('rank', '?')
@@ -282,25 +330,22 @@ if __name__ == "__main__":
                     messages.append(f"话题：{title}\n排位：{rank}\n概述：{title}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             
-            # 向所有群发送同样的消息
             for i in range(len(webhooks)):
                 send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", full_text)
 
-        # ---------- 追加到日累积文件 ----------
+        # 追加到日累积文件
         try:
             with open(DAILY_FILE, 'r', encoding='utf-8') as f:
                 daily_data = json.load(f)
                 daily_topics = set(daily_data.get('topics', []))
         except FileNotFoundError:
             daily_topics = set()
-        # 将本次所有健康热搜标题并入日累积（current_titles 是本次全部健康话题）
         daily_topics.update(current_titles)
         with open(DAILY_FILE, 'w', encoding='utf-8') as f:
             json.dump({'topics': list(daily_topics)}, f, ensure_ascii=False)
         print(f"已更新日累积文件，当前累计 {len(daily_topics)} 个话题。")
-        # ------------------------------------
 
-        # 更新去重状态
+        # 更新去重状态文件（保存当前所有健康话题标题）
         save_sent_topics(current_titles)
         print("已更新去重状态文件。")
     else:
