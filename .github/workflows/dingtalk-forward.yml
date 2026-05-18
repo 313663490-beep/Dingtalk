@@ -52,39 +52,4 @@ jobs:
           })
           print(resp.json())
           "
-
-  # ========== 新增任务：健康热搜定时播报（带去重） ==========
-  health-summary:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: 安装依赖
-        run: pip install requests
-
-            # 恢复缓存
-      - name: 恢复去重缓存
-        uses: actions/cache@v4
-        with:
-          path: sent_topics.json
-          key: sent-topics-${{ runner.os }}
-
-      # 执行脚本
-      - name: 执行抓取与总结脚本
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
-          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
-        run: python scripts/weibo_health_ai.py
-
-      # 保存缓存（现在使用固定 key）
-      - name: 保存去重缓存
-        if: success()
-        uses: actions/cache@v4
-        with:
-          path: sent_topics.json
-          key: sent-topics-${{ runner.os }}
 # refresh schedule
