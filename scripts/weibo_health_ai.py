@@ -15,7 +15,8 @@ HEADERS = {
     "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
 }
 
-CACHE_FILE = "sent_topics.json"
+# 从环境变量获取去重文件名，默认使用 sent_topics.json（兼容旧版）
+CACHE_FILE = os.environ.get('SENT_TOPICS_FILE', 'sent_topics.json')
 
 def load_sent_topics():
     """读取上次发送的话题列表"""
