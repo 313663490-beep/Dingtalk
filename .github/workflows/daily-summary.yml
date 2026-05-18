@@ -30,7 +30,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
-          git add daily_health_topics.json
+          git add -A
           git diff --staged --quiet || git commit -m "日汇总后清空累积 [skip ci]"
+          git pull --rebase origin main
           git push
