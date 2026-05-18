@@ -23,6 +23,7 @@ jobs:
           DINGTALK_WEBHOOKS: "${{ secrets.DINGTALK_WEBHOOK }},${{ secrets.DINGTALK_WEBHOOK_GROUP2 }}"
           DINGTALK_SECRETS: "${{ secrets.DINGTALK_SECRET }},${{ secrets.DINGTALK_SECRET_GROUP2 }}"
           SENT_TOPICS_FILE: sent_topics_common.json
+          DAILY_FILE: daily_health_topics.json
         run: python scripts/weibo_health_ai.py
 
       - name: 提交去重状态
