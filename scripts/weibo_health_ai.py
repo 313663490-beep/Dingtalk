@@ -31,9 +31,9 @@ def save_sent_topics(topics):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump({'topics': list(topics)}, f)
 
-# ==================== 1. 获取微博热搜 (微博官方接口) ====================
+# ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
-    """使用微博官方公开接口获取热搜榜（不获取时间）"""
+    """使用微博官方接口获取热搜榜"""
     api_url = "https://weibo.com/ajax/side/hotSearch"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -48,9 +48,7 @@ def get_weibo_hotspots():
             realtime_list = data['data']['realtime']
             formatted_list = []
             for idx, item in enumerate(realtime_list, start=1):
-                # 兼容不同字段名
                 title = item.get('word') or item.get('note') or item.get('title', '无标题')
-                # 优先用接口返回的链接
                 url = item.get('url', '')
                 if not url:
                     url = f'https://s.weibo.com/weibo?q={title}'
@@ -68,9 +66,9 @@ def get_weibo_hotspots():
         print(f"获取热搜失败: {e}")
         return []
 
-# ==================== 2. AI判断是否健康话题 ====================
+# ==================== 2. AI判断是否健康话题（扩展版） ====================
 def is_health_topic(title):
-    """宽松判断，覆盖全健康场景，但过滤掉明显无效或与人类健康无关的动物新闻"""
+    """宽松判断，覆盖全健康场景，包括自然灾害、应急医疗等"""
     prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“健康全场景”。
 健康全场景包括但不限于：
 - 疾病、症状、治疗、药物、疫苗、医院、ICU、住院、手术、抢救、诊断、感染、中毒、过敏、流行病、食品安全、公共卫生。
@@ -79,6 +77,7 @@ def is_health_topic(title):
 - 生活方式：健身、运动伤害、睡眠、熬夜、保健品、养生、美容整形（明确与健康相关）、衰老、死亡。
 - 母婴：怀孕、生育、早产、育儿健康、母乳、月经、更年期。
 - 环境健康：空气污染、水污染、辐射、虫害滋扰（如蚊虫叮咬）。
+- 自然灾害与意外伤害：地震、洪水、台风、火灾、车祸等直接造成人身伤亡或紧急医疗响应的事件。
 - 科学辟谣（健康类）、医学科普。
 即使标题包含明星、网红姓名，只要涉及上述内容，必须判定为健康。
 
@@ -114,31 +113,61 @@ def is_health_topic(title):
         print(f"判断“{title}”出错: {e}")
         return False
 
-# ==================== 3. 生成单条概述 ====================
-def generate_single_summary(title):
-    """为一条健康热搜生成一句话专业概述"""
-    prompt = f"用一句话概述以下微博健康热搜的核心事实（聚焦疾病、健康风险或医疗事件本身，不要娱乐化）：\n{title}\n概述："
+# ==================== 3. AI归纳话题类别并生成专业概述 ====================
+def generate_health_summary(health_list):
+    """
+    将所有健康热搜交给AI，让它：
+    1. 归纳出概括性话题类别（如“地震灾害与应急医疗响应”）
+    2. 生成一段专业、连贯的综合概述
+    """
+    # 准备原始热搜列表
+    hotspots_text = "\n".join(
+        [f"- [{item['rank']}] {item['title']}" for item in health_list]
+    )
+
+    prompt = f"""你是一个专业的公共卫生与健康信息分析师。以下是今日微博上与健康相关的热搜列表（含排名）：
+{hotspots_text}
+
+请完成以下任务：
+1. **话题归类**：将上述热搜归纳成1~3个概括性的话题类别（例如：“地震灾害与应急医疗响应”、“体重管理与公众健康形象”、“疾病筛查与体征警示”）。话题类别应简洁专业，不应直接照搬原始热搜标题。
+2. **综合概述**：针对每个话题类别，撰写一段专业、客观的概述，要求：
+   - 结合相关热搜的核心事实，说明该健康议题为何引发公众关注。
+   - 从公共卫生、医学常识或社会影响角度进行解释。
+   - 语言精炼，每条概述50字以内。
+   - 如果涉及多条相关热搜，概述中可自然糅合，无需逐条复述。
+
+请按以下格式输出（严格遵守）：
+
+### 话题类别1
+概述：...
+
+### 话题类别2
+概述：...
+
+（如只有一个类别，则只输出一个）"""
+
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "你是一个专业的健康信息摘要员，只输出一句话事实概述。"},
+            {"role": "system", "content": "你是一位专业的健康信息分析师，擅长归纳总结和公共卫生解读。请严格按照格式输出。"},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.3,
-        "max_tokens": 100,
+        "temperature": 0.5,
+        "max_tokens": 800,
         "stream": False
     }
+
     try:
-        resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=10)
+        resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=30)
         if resp.status_code == 200:
-            summary = resp.json()['choices'][0]['message']['content'].strip()
-            return summary
+            result = resp.json()['choices'][0]['message']['content'].strip()
+            return result
         else:
-            print(f"概述生成失败，返回标题: {resp.status_code}")
-            return title
+            print(f"总结生成失败: {resp.status_code} {resp.text}")
+            return None
     except Exception as e:
-        print(f"概述生成异常: {e}")
-        return title
+        print(f"总结生成异常: {e}")
+        return None
 
 # ==================== 4. 发送钉钉消息 ====================
 def send_to_dingtalk(webhook_url, secret, title, text):
@@ -206,19 +235,23 @@ if __name__ == "__main__":
             print("健康热搜列表与上次完全相同，发送提示消息。")
             send_to_dingtalk(webhook_url, secret, "健康热搜", "暂时没最新消息，等待下次更新。")
         else:
-            messages = []
-            for item in health_list:
-                rank = item.get('rank', '?')
-                title = item['title']
-                weibo_query = urllib.parse.quote(title)
-                link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
-                summary = generate_single_summary(title)
-                messages.append(f"话题：{title}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
+            # 生成AI归纳总结
+            ai_summary = generate_health_summary(health_list)
 
-            full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
-            send_to_dingtalk(webhook_url, secret, "健康热搜", full_text)
-            # 发送成功后更新缓存
-            save_sent_topics(current_titles)
-            print("已更新去重缓存。")
+            if ai_summary:
+                # 构建最终的钉钉消息
+                full_text = f"## 微博健康热搜播报\n\n{ai_summary}\n\n---\n**相关热搜原文：**\n"
+                for item in health_list:
+                    rank = item.get('rank', '?')
+                    title = item['title']
+                    weibo_query = urllib.parse.quote(title)
+                    link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
+                    full_text += f"\n- [{title}]({link}) (排位: {rank})"
+
+                send_to_dingtalk(webhook_url, secret, "健康热搜", full_text)
+                save_sent_topics(current_titles)
+                print("已更新去重缓存。")
+            else:
+                print("AI总结生成失败，未发送消息。")
     else:
         print("今日无健康热搜，不发送消息。")
