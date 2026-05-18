@@ -65,7 +65,7 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-      # 恢复上次发送的话题缓存
+            # 恢复缓存
       - name: 恢复去重缓存
         uses: actions/cache@v4
         with:
@@ -80,13 +80,11 @@ jobs:
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
         run: python scripts/weibo_health_ai.py
 
-      # 保存本次发送的话题缓存（仅在脚本成功时保存）
+      # 保存缓存（现在使用固定 key）
       - name: 保存去重缓存
         if: success()
         uses: actions/cache@v4
         with:
           path: sent_topics.json
-          key: sent-topics-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            sent-topics-${{ runner.os }}-
+          key: sent-topics-${{ runner.os }}
 # refresh schedule
