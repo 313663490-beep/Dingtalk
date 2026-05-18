@@ -15,8 +15,8 @@ HEADERS = {
     "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
 }
 
-# 从环境变量读取去重文件名（群1/群2独立）
-CACHE_FILE = os.environ.get('SENT_TOPICS_FILE', 'sent_topics.json')
+# 去重文件（从环境变量读取，默认使用 sent_topics_common.json）
+CACHE_FILE = os.environ.get('SENT_TOPICS_FILE', 'sent_topics_common.json')
 
 def load_sent_topics():
     """读取已发送的话题标题集合"""
@@ -30,31 +30,38 @@ def load_sent_topics():
 def save_sent_topics(topics):
     """保存当前所有健康话题标题（用于下次去重）"""
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump({'topics': list(topics)}, f)
+        json.dump({'topics': list(topics)}, f, ensure_ascii=False)
 
 # ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
+    """使用微博官方公开接口获取热搜榜"""
     api_url = "https://weibo.com/ajax/side/hotSearch"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         "Referer": "https://weibo.com/"
     }
     try:
         resp = requests.get(api_url, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
+        
         if 'data' in data and 'realtime' in data['data']:
             realtime_list = data['data']['realtime']
-            formatted = []
+            formatted_list = []
             for idx, item in enumerate(realtime_list, start=1):
                 raw_title = item.get('word') or item.get('note') or item.get('title', '无标题')
-                title = ' '.join(raw_title.split())   # 标准化标题
+                # 标题标准化：去除首尾空格，合并多个连续空格
+                title = ' '.join(raw_title.split())
                 url = item.get('url', '')
                 if not url:
-                    url = f'https://s.weibo.com/weibo?q={title}'
-                formatted.append({'title': title, 'rank': idx, 'url': url})
-            print(f"成功获取 {len(formatted)} 条热搜")
-            return formatted
+                    url = f'https://s.weibo.com/weibo?q={urllib.parse.quote(title)}'
+                formatted_list.append({
+                    'title': title,
+                    'rank': idx,
+                    'url': url
+                })
+            print(f"成功获取 {len(formatted_list)} 条热搜")
+            return formatted_list
         else:
             print(f"接口返回数据格式错误: {data}")
             return []
@@ -64,6 +71,7 @@ def get_weibo_hotspots():
 
 # ==================== 2. AI判断是否健康话题 ====================
 def is_health_topic(title):
+    """宽松判断，覆盖全健康场景，包括自然灾害、应急医疗等"""
     prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“健康全场景”。
 健康全场景包括但不限于：
 - 疾病、症状、治疗、药物、疫苗、医院、ICU、住院、手术、抢救、诊断、感染、中毒、过敏、流行病、食品安全、公共卫生。
@@ -106,20 +114,29 @@ def is_health_topic(title):
 
 # ==================== 3. 生成专业话题+概述 ====================
 def generate_professional_summaries(health_list):
+    """为每条热搜生成专业话题名称和概述"""
     items_text = "\n".join([f"{item['rank']}. {item['title']}" for item in health_list])
     prompt = f"""你是专业健康信息分析师。为下列每条热搜生成：
-1. 专业话题名称（概括核心健康议题，如“地震灾害与应急医疗响应”）
+1. 专业话题名称（概括核心健康议题，如“地震灾害与应急医疗响应”，不要直接使用原标题）
 2. 一句专业概述（聚焦健康风险或医疗要点，100字以内）
-严格按行输出：排名. 话题：... | 概述：...
-共{len(health_list)}行，不要多余解释。
 
-输入：
+请严格按以下格式输出，每条一行，共{len(health_list)}行，不要添加任何额外解释：
+排名. 话题：... | 概述：...
+
+输入示例：
+1. 广西柳州地震已致2人死亡
+输出示例：
+1. 话题：地震灾害与应急医疗响应 | 概述：广西柳州地震致人员伤亡，应急医疗救援和灾后防疫工作紧急展开。
+
+现在输入：
 {items_text}
-输出："""
+
+请输出："""
+    
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "你是一位专业健康信息分析师，只输出指定格式。"},
+            {"role": "system", "content": "你是一位专业健康信息分析师，只输出指定格式，不要多说一个字。"},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.3,
@@ -141,29 +158,31 @@ def generate_professional_summaries(health_list):
                     parts = line.split('|')
                     if len(parts) != 2:
                         continue
-                    topic = parts[0].split('话题：')[1].strip()
-                    summary = parts[1].split('概述：')[1].strip()
+                    topic_part = parts[0].split('话题：')[1].strip()
+                    summary_part = parts[1].split('概述：')[1].strip()
+                    # 找到对应排名的热搜
                     for item in health_list:
                         if item['rank'] == rank:
                             item_copy = item.copy()
-                            item_copy['topic'] = topic
-                            item_copy['summary'] = summary
+                            item_copy['topic'] = topic_part
+                            item_copy['summary'] = summary_part
                             results.append(item_copy)
                             break
             if len(results) == len(health_list):
                 return results
             else:
-                print(f"AI返回条目不匹配，回退")
+                print(f"AI返回条目不匹配（期望{len(health_list)}，得到{len(results)}），回退到原始标题")
                 return None
         else:
-            print(f"生成摘要失败: {resp.status_code}")
+            print(f"生成专业摘要失败: {resp.status_code} {resp.text}")
             return None
     except Exception as e:
-        print(f"生成摘要异常: {e}")
+        print(f"生成专业摘要异常: {e}")
         return None
 
 # ==================== 4. 发送钉钉消息 ====================
 def send_to_dingtalk(webhook_url, secret, title, text):
+    """通过钉钉机器人发送 markdown 消息"""
     timestamp = str(round(time.time() * 1000))
     secret_enc = secret.encode('utf-8')
     string_to_sign = f'{timestamp}\n{secret}'
@@ -172,12 +191,18 @@ def send_to_dingtalk(webhook_url, secret, title, text):
     webhook_url = f'{webhook_url}&timestamp={timestamp}&sign={sign}'
 
     headers = {'Content-Type': 'application/json'}
-    data = {"msgtype": "markdown", "markdown": {"title": title, "text": text}}
+    data = {
+        "msgtype": "markdown",
+        "markdown": {
+            "title": title,
+            "text": text
+        }
+    }
     try:
         resp = requests.post(webhook_url, headers=headers, json=data)
         result = resp.json()
         if result.get('errcode') == 0:
-            print("✅ 钉钉消息发送成功！")
+            print(f"✅ 钉钉消息发送成功！")
         else:
             print(f"❌ 钉钉发送失败: {resp.text}")
     except Exception as e:
@@ -205,28 +230,35 @@ if __name__ == "__main__":
 
     print(f"共筛选出 {len(health_list)} 条健康热搜")
 
-    webhook_url = os.environ.get('DINGTALK_WEBHOOK')
-    secret = os.environ.get('DINGTALK_SECRET')
-    if not webhook_url or not secret:
-        print("钉钉环境变量缺失，无法发送")
+    # 读取多个群的钉钉凭证（用逗号分隔，一一对应）
+    webhooks_str = os.environ.get('DINGTALK_WEBHOOKS', '')
+    secrets_str = os.environ.get('DINGTALK_SECRETS', '')
+    webhooks = [w.strip() for w in webhooks_str.split(',') if w.strip()]
+    secrets = [s.strip() for s in secrets_str.split(',') if s.strip()]
+
+    if not webhooks or not secrets or len(webhooks) != len(secrets):
+        print("钉钉环境变量缺失或数量不匹配，无法发送")
         exit(1)
 
     if health_list:
-        # 标准化标题（已在获取时处理，这里再次确保）
+        # 再次标准化标题（确保去重准确）
         for item in health_list:
             item['title'] = ' '.join(item['title'].split())
 
         current_titles = set(item['title'] for item in health_list)
         last_titles = load_sent_topics()
 
+        # 增量去重：只保留上次没出现过的新热搜
         new_health_list = [item for item in health_list if item['title'] not in last_titles]
 
         if not new_health_list:
-            print("没有新增健康热搜，发送提示消息。")
-            send_to_dingtalk(webhook_url, secret, "健康热搜", "暂时没最新消息，等待下次更新。")
+            print("没有新增健康热搜，发送提示消息给所有群。")
+            for i in range(len(webhooks)):
+                send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", "暂时没最新消息，等待下次更新。")
         else:
             print(f"发现 {len(new_health_list)} 条新增健康热搜")
             professional_items = generate_professional_summaries(new_health_list)
+            
             if professional_items:
                 messages = []
                 for item in professional_items:
@@ -238,7 +270,7 @@ if __name__ == "__main__":
                     messages.append(f"话题：{topic}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             else:
-                # 回退：使用原标题
+                # 回退方案：使用原始标题
                 messages = []
                 for item in new_health_list:
                     rank = item.get('rank', '?')
@@ -247,9 +279,12 @@ if __name__ == "__main__":
                     link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
                     messages.append(f"话题：{title}\n排位：{rank}\n概述：{title}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
-            send_to_dingtalk(webhook_url, secret, "健康热搜", full_text)
+            
+            # 向所有群发送同样的消息
+            for i in range(len(webhooks)):
+                send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", full_text)
 
-        # 无论有无新增，都更新已发送集合为当前所有健康话题标题
+        # 更新去重状态（保存当前所有健康热搜标题，已发送过的会永久记录）
         save_sent_topics(current_titles)
         print("已更新去重状态文件。")
     else:
