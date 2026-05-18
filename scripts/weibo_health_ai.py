@@ -126,7 +126,7 @@ def generate_professional_summaries(health_list):
     items_text = "\n".join([f"{item['rank']}. {item['title']}" for item in health_list])
     
     prompt = f"""你是专业的健康信息分析师。以下是今日微博上与健康相关的热搜（含排名），请为每条热搜生成：
-1. 一个专业话题名称（概括核心健康议题，如“地震灾害与应急医疗响应”，不要直接使用原标题）
+1. 一个专业话题名称（概括核心健康议题，如“地震灾害与应急医疗响应”，专业话题名称后，加上原标题）
 2. 一句专业概述（聚焦健康风险或医疗要点，100字以内）
 
 请严格按以下格式输出，每条一行，共{len(health_list)}行，不要加额外解释：
