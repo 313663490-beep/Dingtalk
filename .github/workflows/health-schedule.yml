@@ -1,4 +1,4 @@
-name: 微博健康热搜定时播报-群1
+name: 微博健康热搜定时播报（双群同步）
 
 on:
   workflow_dispatch:
@@ -20,9 +20,9 @@ jobs:
       - name: 执行抓取与总结脚本
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
-          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
-          SENT_TOPICS_FILE: sent_topics_common.json          # 公共文件
+          DINGTALK_WEBHOOKS: "${{ secrets.DINGTALK_WEBHOOK }},${{ secrets.DINGTALK_WEBHOOK_GROUP2 }}"
+          DINGTALK_SECRETS: "${{ secrets.DINGTALK_SECRET }},${{ secrets.DINGTALK_SECRET_GROUP2 }}"
+          SENT_TOPICS_FILE: sent_topics_common.json
         run: python scripts/weibo_health_ai.py
 
       - name: 提交去重状态
