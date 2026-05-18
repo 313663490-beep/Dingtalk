@@ -2,8 +2,8 @@ name: 微博健康热搜定时播报
 
 on:
   schedule:
-    - cron: '*/20 * * * *'   # 每20分钟一次，测试完毕后可按需调整
-  workflow_dispatch:          # 允许手动触发
+    - cron: '*/20 * * * *'   # 可自行调整频率
+  workflow_dispatch:          # 手动触发
 
 jobs:
   health-summary:
@@ -16,15 +16,16 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-      # 1. 尝试下载上次保存的去重状态文件
-      - name: 下载去重状态
-        continue-on-error: true
-        uses: dawidd6/action-download-artifact@v6
+      # 1. 恢复上次保存的已发送列表（固定 key）
+      - name: 恢复去重缓存
+        id: cache-restore
+        uses: actions/cache@v4
         with:
-          name: sent-topics
-          path: .
+          path: sent_topics.json
+          key: sent-topics-cache
+          restore-keys: sent-topics-cache
 
-      # 2. 运行主脚本（内部会读取/写入 sent_topics.json）
+      # 2. 运行脚本
       - name: 执行抓取与总结脚本
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -32,10 +33,10 @@ jobs:
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
         run: python scripts/weibo_health_ai.py
 
-      # 3. 上传更新后的去重状态文件（保存 7 天，避免占用空间）
-      - name: 上传去重状态
-        uses: actions/upload-artifact@v4
+      # 3. 保存更新后的已发送列表（使用完全相同的固定 key）
+      - name: 保存去重缓存
+        if: success()
+        uses: actions/cache@v4
         with:
-          name: sent-topics
           path: sent_topics.json
-          retention-days: 7
+          key: sent-topics-cache
