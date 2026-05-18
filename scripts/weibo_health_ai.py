@@ -253,23 +253,27 @@ if __name__ == "__main__":
         print("钉钉环境变量缺失，无法发送")
         exit(1)
 
-    if health_list:
+       if health_list:
         current_titles = set(item['title'] for item in health_list)
         last_titles = load_sent_topics()
 
-        if current_titles == last_titles:
-            print("健康热搜列表与上次完全相同，发送提示消息。")
+        # 增量去重：只保留上次没出现过的新热搜
+        new_health_list = [item for item in health_list if item['title'] not in last_titles]
+
+        if not new_health_list:
+            print("没有新增健康热搜，发送提示消息。")
             send_to_dingtalk(webhook_url, secret, "健康热搜", "暂时没最新消息，等待下次更新。")
         else:
-            # 尝试为每条热搜生成专业话题+概述
-            professional_items = generate_professional_summaries(health_list)
+            print(f"发现 {len(new_health_list)} 条新增健康热搜（共 {len(health_list)} 条，其中 {len(health_list) - len(new_health_list)} 条已发送过）")
+
+            # 为新增热搜生成专业话题+概述
+            professional_items = generate_professional_summaries(new_health_list)
             
             if professional_items:
-                # 构建消息
                 messages = []
                 for item in professional_items:
                     rank = item.get('rank', '?')
-                    topic = item.get('topic', item['title'])  # 回退到原标题
+                    topic = item.get('topic', item['title'])
                     summary = item.get('summary', item['title'])
                     weibo_query = urllib.parse.quote(item['title'])
                     link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
@@ -277,19 +281,19 @@ if __name__ == "__main__":
                 
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             else:
-                # 如果AI生成失败，回退到原来的简单概述方式
-                print("AI专业摘要生成失败，使用备用概述。")
+                # 回退方案
                 messages = []
-                for item in health_list:
+                for item in new_health_list:
                     rank = item.get('rank', '?')
                     title = item['title']
                     weibo_query = urllib.parse.quote(title)
                     link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
-                    # 简单的概述就用原标题（或者调用以前的generate_single_summary，这里先简化）
                     messages.append(f"话题：{title}\n排位：{rank}\n概述：{title}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             
             send_to_dingtalk(webhook_url, secret, "健康热搜", full_text)
+            
+            # 更新缓存为当前所有健康热搜的标题集合（确保下次不会重复发送）
             save_sent_topics(current_titles)
             print("已更新去重缓存。")
     else:
