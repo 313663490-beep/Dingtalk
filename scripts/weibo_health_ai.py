@@ -17,6 +17,8 @@ HEADERS = {
 
 # 去重文件（从环境变量读取，默认使用 sent_topics_common.json）
 CACHE_FILE = os.environ.get('SENT_TOPICS_FILE', 'sent_topics_common.json')
+# 日累积文件
+DAILY_FILE = os.environ.get('DAILY_FILE', 'daily_health_topics.json')
 
 def load_sent_topics():
     """读取已发送的话题标题集合"""
@@ -284,7 +286,21 @@ if __name__ == "__main__":
             for i in range(len(webhooks)):
                 send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", full_text)
 
-        # 更新去重状态（保存当前所有健康热搜标题，已发送过的会永久记录）
+        # ---------- 追加到日累积文件 ----------
+        try:
+            with open(DAILY_FILE, 'r', encoding='utf-8') as f:
+                daily_data = json.load(f)
+                daily_topics = set(daily_data.get('topics', []))
+        except FileNotFoundError:
+            daily_topics = set()
+        # 将本次所有健康热搜标题并入日累积（current_titles 是本次全部健康话题）
+        daily_topics.update(current_titles)
+        with open(DAILY_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'topics': list(daily_topics)}, f, ensure_ascii=False)
+        print(f"已更新日累积文件，当前累计 {len(daily_topics)} 个话题。")
+        # ------------------------------------
+
+        # 更新去重状态
         save_sent_topics(current_titles)
         print("已更新去重状态文件。")
     else:
