@@ -8,13 +8,6 @@ import urllib.parse
 import json
 
 # ==================== 配置 ====================
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-HEADERS = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-}
-
 DAILY_FILE = os.environ.get('DAILY_FILE', 'daily_health_topics.json')
 
 def load_daily_topics():
@@ -28,36 +21,6 @@ def load_daily_topics():
 def clear_daily_topics():
     with open(DAILY_FILE, 'w', encoding='utf-8') as f:
         json.dump({'topics': []}, f)
-
-def generate_daily_summary(topics):
-    if not topics:
-        return None
-    topics_text = "\n".join([f"- {t}" for t in topics])
-    prompt = f"""你是一位专业的健康信息分析师。以下是今天微博上出现的与健康相关的热搜话题列表：
-{topics_text}
-
-请总结今日健康热点，用2-3段话概述核心议题和趋势，语言专业但通俗易懂，总字数控制在300字以内。"""
-
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "你是一位专业的健康信息分析师，善于总结每日健康热点。"},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.5,
-        "max_tokens": 500,
-        "stream": False
-    }
-    try:
-        resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=30)
-        if resp.status_code == 200:
-            return resp.json()['choices'][0]['message']['content'].strip()
-        else:
-            print(f"AI 汇总失败: {resp.status_code} {resp.text}")
-            return None
-    except Exception as e:
-        print(f"AI 汇总异常: {e}")
-        return None
 
 def send_to_dingtalk(webhook_url, secret, title, text):
     timestamp = str(round(time.time() * 1000))
@@ -101,19 +64,17 @@ if __name__ == "__main__":
     if not daily_topics:
         print("今天暂无健康热搜，发送提示。")
         for i in range(len(webhooks)):
-            send_to_dingtalk(webhooks[i], secrets[i], "今日健康热搜汇总", "今天没有监测到健康相关热搜，明天见～")
+            send_to_dingtalk(webhooks[i], secrets[i], "今日健康热搜汇总", "今日没有监测到健康相关热搜，明天见～")
     else:
-        summary = generate_daily_summary(daily_topics)
-        if summary:
-            full_text = f"## 📊 今日健康热搜汇总\n\n{summary}"
-            for i in range(len(webhooks)):
-                send_to_dingtalk(webhooks[i], secrets[i], "今日健康热搜汇总", full_text)
-        else:
-            # 回退：列出所有话题
-            topics_list = "\n".join([f"- {t}" for t in daily_topics])
-            full_text = f"## 📊 今日健康热搜汇总\n\n今日共监测到以下健康话题：\n{topics_list}"
-            for i in range(len(webhooks)):
-                send_to_dingtalk(webhooks[i], secrets[i], "今日健康热搜汇总", full_text)
+        # 构建列表式消息：每条话题带链接
+        lines = []
+        for idx, topic in enumerate(daily_topics, start=1):
+            query = urllib.parse.quote(topic)
+            link = f"https://s.weibo.com/weibo?q={query}&t=31&Refer=top"
+            lines.append(f"{idx}. [{topic}]({link})")
+        full_text = f"## 📊 今日健康热搜汇总\n\n今日共监测到以下健康话题：\n" + "\n".join(lines)
+        for i in range(len(webhooks)):
+            send_to_dingtalk(webhooks[i], secrets[i], "今日健康热搜汇总", full_text)
 
     # 清空日累积文件
     clear_daily_topics()
