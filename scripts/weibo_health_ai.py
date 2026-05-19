@@ -34,51 +34,6 @@ def save_sent_topics(topics):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump({'topics': list(topics)}, f, ensure_ascii=False)
 
-def is_duplicate_topic(new_title, sent_titles_list):
-    """
-    调用AI判断新标题是否与已发送列表中的任何一个标题语义重复。
-    如果重复，返回 True。
-    """
-    if not sent_titles_list:
-        return False
-
-    # 如果精确匹配，直接返回重复
-    if new_title in sent_titles_list:
-        return True
-
-    sent_titles_str = "\n".join([f"- {t}" for t in sent_titles_list])
-    prompt = f"""请判断以下“新标题”是否与“已发送列表”中的任何一个标题在**语义上完全相同或高度相似**（比如指向同一个核心事件、同一个健康话题）：
-    
-已发送列表：
-{sent_titles_str}
-
-新标题：{new_title}
-
-如果新标题与列表中任何一个标题高度相似，请直接回答“重复”；如果完全不同，请回答“不重复”。
-请只回答两个字：重复 或 不重复。"""
-
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "你是一个精确的话题去重器，只输出重复或不重复。"},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.0,
-        "max_tokens": 10,
-        "stream": False
-    }
-    try:
-        resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=10)
-        if resp.status_code != 200:
-            print(f"去重接口异常 {resp.status_code}: {resp.text}")
-            return False  # 网络错误时，不认为是重复，宁滥勿缺
-        answer = resp.json()['choices'][0]['message']['content'].strip()
-        print(f"语义去重判断: 新标题 \"{new_title}\" → {answer}")
-        return "重复" in answer
-    except Exception as e:
-        print(f"语义去重异常: {e}")
-        return False
-
 # ==================== 1. 获取微博热搜 ====================
 def get_weibo_hotspots():
     """使用微博官方公开接口获取热搜榜"""
@@ -97,6 +52,7 @@ def get_weibo_hotspots():
             formatted_list = []
             for idx, item in enumerate(realtime_list, start=1):
                 raw_title = item.get('word') or item.get('note') or item.get('title', '无标题')
+                # 标准化标题
                 title = ' '.join(raw_title.split())
                 url = item.get('url', '')
                 if not url:
@@ -118,7 +74,7 @@ def get_weibo_hotspots():
 # ==================== 2. AI判断是否健康话题 ====================
 def is_health_topic(title):
     """宽松判断，覆盖全健康场景"""
-    prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“健康全场景”。
+       prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于"健康全场景"。
 健康全场景包括但不限于：
 - 疾病、症状、治疗、药物、疫苗、医院、ICU、住院、手术、抢救、诊断、感染、中毒、过敏、流行病、食品安全、公共卫生。
 - 饮食健康、营养、体重管理、减肥、增重、暴饮暴食、饮食误区、医嘱误解、食物中毒。
@@ -127,12 +83,13 @@ def is_health_topic(title):
 - 母婴：怀孕、生育、早产、育儿健康、母乳、月经、更年期。
 - 环境健康：空气污染、水污染、辐射、虫害滋扰。
 - 自然灾害与意外伤害：地震、洪水、台风、火灾、车祸、扶梯事故等直接造成人身伤亡或需紧急医疗救援的事件。
+- 医疗制度与政策：医保改革、个人账户、异地结算、药品集采、医疗反腐、医患关系等。
 - 科学辟谣（健康类）、医学科普。
 即使标题包含明星姓名，只要涉及上述内容，必须判定为健康。
 
 动物新闻规则：涉及人畜共患病、咬伤、狂犬病等影响人类健康的算健康；宠物去世、动物园趣事等不算。
-拒绝示例：“日本送给普京的秋田犬去世” → 否。
-允许示例：“女子被流浪狗咬伤后得狂犬病” → 是。
+拒绝示例："日本送给普京的秋田犬去世" → 否。
+允许示例："女子被流浪狗咬伤后得狂犬病" → 是。
 
 标题：{title}
 请只回答一个字：是 或 否。"""
@@ -160,19 +117,23 @@ def is_health_topic(title):
 
 # ==================== 3. 生成专业话题+概述 ====================
 def generate_professional_summaries(health_list):
-    """为每条热搜生成专业话题名称和概述"""
+    """为每条热搜生成专业话题名称、话题原标题和概述"""
     items_text = "\n".join([f"{item['rank']}. {item['title']}" for item in health_list])
-    prompt = f"""你是专业健康信息分析师。为下列每条热搜生成：
-1. 专业话题名称（概括核心健康议题，不要直接使用原标题）
-2. 一句专业概述（聚焦健康风险或医疗要点，100字以内）
+        prompt = f"""你是专业健康信息分析师。以下是今日微博上与健康相关的完整热搜列表（含所有通过筛选的健康话题）：
+{items_text}
+
+请为其中**每条热搜**生成：
+1. 一个专业话题名称和一个原标题（概括核心健康议题）。
+2. 一句专业概述（100字以内），要求：
+   - 聚焦健康风险或医疗要点。
+   - **如果该话题与列表中其他热搜（特别是排名相邻或内容高度相关的话题）存在呼应关系，请在概述末尾简要提及这种关联**，例如"与热搜第2条内容高度呼应，聚焦XX事件"。
 
 请严格按以下格式输出，每条一行，共{len(health_list)}行：
 排名. 话题：... | 概述：...
 
-输入示例：
-1. 广西柳州地震已致2人死亡
 输出示例：
-1. 话题：地震灾害与应急医疗响应 | 概述：广西柳州地震致人员伤亡，应急医疗救援和灾后防疫工作紧急展开。
+1. 话题：医保个人账户新规 | 概述：国家医保局发布职工医保个账新规，明确支付白名单，禁止购买非医药类商品，强化家庭共济管理。
+33. 话题：村庄癌症聚集与环境污染疑云 | 概述：武汉某村62人患癌，村民反映饮用水及化工污染问题，与热搜第2条内容高度呼应，呼吁权威医学与环境调查。
 
 现在输入：
 {items_text}
@@ -216,10 +177,10 @@ def generate_professional_summaries(health_list):
             if len(results) == len(health_list):
                 return results
             else:
-                print(f"AI返回条目不匹配（期望{len(health_list)}，得到{len(results)}），回退到原始标题")
+                print(f"AI返回条目不匹配，回退到原始标题")
                 return None
         else:
-            print(f"生成专业摘要失败: {resp.status_code} {resp.text}")
+            print(f"生成专业摘要失败: {resp.status_code}")
             return None
     except Exception as e:
         print(f"生成专业摘要异常: {e}")
@@ -255,7 +216,7 @@ def send_to_dingtalk(webhook_url, secret, title, text):
 
 # ==================== 主程序 ====================
 if __name__ == "__main__":
-    print("开始健康热搜筛选与语义去重...")
+    print("开始健康热搜筛选与纯标题去重...")
     hotspots = get_weibo_hotspots()
     if not hotspots:
         print("未获取到热搜数据，退出。")
@@ -286,21 +247,15 @@ if __name__ == "__main__":
         exit(1)
 
     if health_list:
+        # 标准化标题
         for item in health_list:
             item['title'] = ' '.join(item['title'].split())
 
         current_titles = set(item['title'] for item in health_list)
         last_titles = load_sent_topics()
 
-        # 语义去重：使用AI判断，过滤掉与已发送列表中语义重复的话题
-        sent_titles_list = list(last_titles)  # 初始已发送列表
-        new_health_list = []
-        for item in health_list:
-            if not is_duplicate_topic(item['title'], sent_titles_list):
-                new_health_list.append(item)
-                sent_titles_list.append(item['title'])  # 避免本次运行内重复
-            else:
-                print(f"语义去重：过滤掉重复话题 \"{item['title']}\"")
+        # 纯标题去重：只保留上次没出现过的新标题
+        new_health_list = [item for item in health_list if item['title'] not in last_titles]
 
         if not new_health_list:
             print("没有新增健康热搜，发送提示消息给所有群。")
@@ -321,6 +276,7 @@ if __name__ == "__main__":
                     messages.append(f"话题：{topic}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             else:
+                # 回退方案：使用原始标题
                 messages = []
                 for item in new_health_list:
                     rank = item.get('rank', '?')
@@ -330,6 +286,7 @@ if __name__ == "__main__":
                     messages.append(f"话题：{title}\n排位：{rank}\n概述：{title}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             
+            # 向所有群发送同样的消息
             for i in range(len(webhooks)):
                 send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", full_text)
 
