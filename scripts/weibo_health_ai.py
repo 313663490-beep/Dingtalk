@@ -52,7 +52,6 @@ def get_weibo_hotspots():
             formatted_list = []
             for idx, item in enumerate(realtime_list, start=1):
                 raw_title = item.get('word') or item.get('note') or item.get('title', '无标题')
-                # 标准化标题
                 title = ' '.join(raw_title.split())
                 url = item.get('url', '')
                 if not url:
@@ -71,10 +70,10 @@ def get_weibo_hotspots():
         print(f"获取热搜失败: {e}")
         return []
 
-# ==================== 2. AI判断是否健康话题 ====================
+# ==================== 2. AI判断是否健康话题（新增医保等制度） ====================
 def is_health_topic(title):
-    """宽松判断，覆盖全健康场景"""
-       prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于"健康全场景"。
+    """宽松判断，覆盖全健康场景，包括医保等制度"""
+    prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“健康全场景”。
 健康全场景包括但不限于：
 - 疾病、症状、治疗、药物、疫苗、医院、ICU、住院、手术、抢救、诊断、感染、中毒、过敏、流行病、食品安全、公共卫生。
 - 饮食健康、营养、体重管理、减肥、增重、暴饮暴食、饮食误区、医嘱误解、食物中毒。
@@ -88,8 +87,8 @@ def is_health_topic(title):
 即使标题包含明星姓名，只要涉及上述内容，必须判定为健康。
 
 动物新闻规则：涉及人畜共患病、咬伤、狂犬病等影响人类健康的算健康；宠物去世、动物园趣事等不算。
-拒绝示例："日本送给普京的秋田犬去世" → 否。
-允许示例："女子被流浪狗咬伤后得狂犬病" → 是。
+拒绝示例：“日本送给普京的秋田犬去世” → 否。
+允许示例：“女子被流浪狗咬伤后得狂犬病” → 是。
 
 标题：{title}
 请只回答一个字：是 或 否。"""
@@ -115,18 +114,18 @@ def is_health_topic(title):
         print(f"判断“{title}”出错: {e}")
         return False
 
-# ==================== 3. 生成专业话题+概述 ====================
+# ==================== 3. 生成专业话题+概述（新增关联呼应） ====================
 def generate_professional_summaries(health_list):
-    """为每条热搜生成专业话题名称、话题原标题和概述"""
+    """为每条热搜生成专业话题名称和概述，并体现与其他热搜的呼应"""
     items_text = "\n".join([f"{item['rank']}. {item['title']}" for item in health_list])
-        prompt = f"""你是专业健康信息分析师。以下是今日微博上与健康相关的完整热搜列表（含所有通过筛选的健康话题）：
+    prompt = f"""你是专业健康信息分析师。以下是今日微博上与健康相关的完整热搜列表（含所有通过筛选的健康话题）：
 {items_text}
 
 请为其中**每条热搜**生成：
-1. 一个专业话题名称和一个原标题（概括核心健康议题）。
+1. 一个专业话题名称（概括核心健康议题，不要直接使用原标题）。
 2. 一句专业概述（100字以内），要求：
    - 聚焦健康风险或医疗要点。
-   - **如果该话题与列表中其他热搜（特别是排名相邻或内容高度相关的话题）存在呼应关系，请在概述末尾简要提及这种关联**，例如"与热搜第2条内容高度呼应，聚焦XX事件"。
+   - **如果该话题与列表中其他热搜（特别是排名相邻或内容高度相关的话题）存在呼应关系，请在概述末尾简要提及这种关联**，例如“与热搜第2条内容高度呼应，聚焦XX事件”。
 
 请严格按以下格式输出，每条一行，共{len(health_list)}行：
 排名. 话题：... | 概述：...
@@ -236,7 +235,6 @@ if __name__ == "__main__":
 
     print(f"共筛选出 {len(health_list)} 条健康热搜")
 
-    # 读取多个群的钉钉凭证
     webhooks_str = os.environ.get('DINGTALK_WEBHOOKS', '')
     secrets_str = os.environ.get('DINGTALK_SECRETS', '')
     webhooks = [w.strip() for w in webhooks_str.split(',') if w.strip()]
@@ -247,14 +245,12 @@ if __name__ == "__main__":
         exit(1)
 
     if health_list:
-        # 标准化标题
         for item in health_list:
             item['title'] = ' '.join(item['title'].split())
 
         current_titles = set(item['title'] for item in health_list)
         last_titles = load_sent_topics()
 
-        # 纯标题去重：只保留上次没出现过的新标题
         new_health_list = [item for item in health_list if item['title'] not in last_titles]
 
         if not new_health_list:
@@ -276,7 +272,6 @@ if __name__ == "__main__":
                     messages.append(f"话题：{topic}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             else:
-                # 回退方案：使用原始标题
                 messages = []
                 for item in new_health_list:
                     rank = item.get('rank', '?')
@@ -286,7 +281,6 @@ if __name__ == "__main__":
                     messages.append(f"话题：{title}\n排位：{rank}\n概述：{title}\n链接：{link}\n")
                 full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
             
-            # 向所有群发送同样的消息
             for i in range(len(webhooks)):
                 send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", full_text)
 
@@ -302,7 +296,6 @@ if __name__ == "__main__":
             json.dump({'topics': list(daily_topics)}, f, ensure_ascii=False)
         print(f"已更新日累积文件，当前累计 {len(daily_topics)} 个话题。")
 
-        # 更新去重状态文件（保存当前所有健康话题标题）
         save_sent_topics(current_titles)
         print("已更新去重状态文件。")
     else:
