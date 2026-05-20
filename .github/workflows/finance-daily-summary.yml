@@ -1,0 +1,34 @@
+name: 每日理财热搜汇总播报
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  daily-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 生成日汇总并推送
+        env:
+          DINGTALK_WEBHOOK_FINANCE: ${{ secrets.DINGTALK_WEBHOOK_FINANCE }}
+          DINGTALK_SECRET_FINANCE: ${{ secrets.DINGTALK_SECRET_FINANCE }}
+        run: python scripts/weibo_finance_daily_summary.py
+
+      - name: 提交清空后的累积文件
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "日汇总后清空理财累积 [skip ci]"
+          git pull --rebase origin main
+          git push
