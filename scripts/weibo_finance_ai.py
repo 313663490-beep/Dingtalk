@@ -17,9 +17,10 @@ HEADERS = {
 
 # 去重文件（理财专用）
 CACHE_FILE = "sent_topics_finance.json"
+# 日累积文件
+DAILY_FILE = "daily_finance_topics.json"
 
 def load_sent_topics():
-    """读取已发送的理财话题标题集合"""
     try:
         with open(CACHE_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -28,7 +29,6 @@ def load_sent_topics():
         return set()
 
 def save_sent_topics(topics):
-    """保存当前所有理财话题标题"""
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump({'topics': list(topics)}, f, ensure_ascii=False)
 
@@ -66,16 +66,16 @@ def get_weibo_hotspots():
 def is_finance_topic(title):
     prompt = f"""请用最宽松的标准判断以下微博热搜标题是否属于“理财/投资/财经”领域。
 理财话题包括但不限于：
+- 存款、存钱、攒钱、搞钱、省钱、省钱技巧等与个人资金管理直接相关的话题。
 - 股票、基金、债券、黄金、外汇、加密货币、期货等投资品种。
-- 银行理财、保险理财、信托产品、资管新规、利率变化。
+- 银行理财、保险理财、信托、资管新规、利率变化。
 - 楼市政策、房贷利率、房价走势、房产投资。
 - 个人所得税、企业税、印花税、社保公积金等财税政策。
 - 养老金、个人养老金账户、退休规划、社保改革。
 - 创业投资、独角兽、IPO、融资、并购、市值。
 - 财经名人观点、机构研报、经济数据（CPI、GDP等）。
 - 消费金融、信用卡、花呗、借呗、反诈骗提醒（涉及钱财）。
-- 即使标题包含明星姓名，只要涉及投资、理财、税务等内容，必须判定为理财。
-- 纯娱乐八卦、体育赛事、自然灾害等不涉及钱财话题的算非理财。
+- 明确排除：明星发红包、转发抽奖、娱乐八卦、体育赛事、自然灾害等与个人/家庭理财无关的话题。
 
 标题：{title}
 请只回答一个字：是 或 否。"""
@@ -108,7 +108,7 @@ def generate_finance_summaries(finance_list):
 {items_text}
 
 请为**每条热搜**生成：
-1. 一个专业话题名称（概括核心财经议题，例如“个人养老金制度落地”、“美股科技股暴跌”）。
+1. 一个专业话题名称（概括核心财经议题，例如“个人养老金制度落地”、“存款技巧讨论”）。
 2. 一句专业概述（100字以内），简明扼要地说明新闻要点和潜在影响。
 
 请严格按以下格式输出，每条一行，共{len(finance_list)}行：
@@ -116,7 +116,7 @@ def generate_finance_summaries(finance_list):
 
 输出示例：
 1. 话题：个人养老金账户新规 | 概述：个人养老金账户试点扩大，每年1.2万缴费上限不变，可投资公募基金等产品，利好长期理财规划。
-2. 话题：港股科技股反弹 | 概述：恒生科技指数日内涨超5%，互联网平台企业估值修复，市场对监管环境缓和持乐观预期。
+2. 话题：年轻人攒钱新趋势 | 概述：热搜反映年轻群体开始重视强制储蓄，定期存款和货币基金受青睐，有助于个人财务安全垫构建。
 
 现在输入：
 {items_text}
@@ -169,7 +169,7 @@ def generate_finance_summaries(finance_list):
         print(f"生成摘要异常: {e}")
         return None
 
-# ==================== 4. 发送钉钉消息（单群） ====================
+# ==================== 4. 发送钉钉消息 ====================
 def send_to_dingtalk(webhook_url, secret, title, text):
     timestamp = str(round(time.time() * 1000))
     secret_enc = secret.encode('utf-8')
@@ -258,6 +258,18 @@ if __name__ == "__main__":
                 full_text = f"## 微博理财热搜播报\n\n" + "\n".join(messages)
             
             send_to_dingtalk(webhook_url, secret, "理财热搜", full_text)
+
+        # 追加到日累积文件
+        try:
+            with open(DAILY_FILE, 'r', encoding='utf-8') as f:
+                daily_data = json.load(f)
+                daily_topics = set(daily_data.get('topics', []))
+        except FileNotFoundError:
+            daily_topics = set()
+        daily_topics.update(current_titles)
+        with open(DAILY_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'topics': list(daily_topics)}, f, ensure_ascii=False)
+        print(f"已更新日累积文件，当前累计 {len(daily_topics)} 个话题。")
 
         save_sent_topics(current_titles)
         print("已更新去重状态文件。")
