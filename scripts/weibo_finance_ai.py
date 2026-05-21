@@ -241,7 +241,7 @@ if __name__ == "__main__":
                 messages = []
                 for item in professional_items:
                     rank = item.get('rank', '?')
-                    topic = item.get('topic', item['title'])
+                    topic = item['title']       # 直接使用微博原始热搜标题
                     summary = item.get('summary', item['title'])
                     weibo_query = urllib.parse.quote(item['title'])
                     link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
