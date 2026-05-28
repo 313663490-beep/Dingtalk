@@ -48,7 +48,6 @@ def load_pending():
 
 def save_pending(items):
     """保存待发池（用 title 去重，保留最新的 rank 和 url）"""
-    # 转为 dict 以 title 为 key 去重
     merged = {}
     for item in items:
         title = item['title']
@@ -131,7 +130,36 @@ def is_health_topic(title):
         print(f"判断“{title}”出错: {e}")
         return False
 
-# ==================== 3. 生成专业概述（仅用于汇总播报） ====================
+# ==================== 3. 豆包关联判断 ====================
+def is_doubao_related(title):
+    """判断健康话题是否与豆包/Doubao/字节AI直接相关"""
+    prompt = f"""请判断以下健康热搜标题是否与"豆包"、"Doubao"、"字节跳动AI"直接相关。
+只判断是否关联豆包这个AI产品，不判断是否为健康话题。
+如果标题中明确提到"豆包"、"Doubao"、"字节AI"，或标题描述的事件核心与豆包AI的指导行为有关，请回答"是"。
+如果标题是关于其他AI产品（如ChatGPT、文心一言等）或通用AI话题，请回答"否"。
+标题：{title}
+请只回答一个字：是 或 否。"""
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "你是一个话题关联判断器，只输出是或否。"},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 10,
+        "stream": False
+    }
+    try:
+        resp = requests.post(DEEPSEEK_API_URL, headers=HEADERS, json=payload, timeout=10)
+        if resp.status_code != 200:
+            return False
+        answer = resp.json()['choices'][0]['message']['content'].strip()
+        return "是" in answer
+    except Exception as e:
+        print(f"豆包关联判断异常: {e}")
+        return False
+
+# ==================== 4. 生成专业概述（仅用于汇总播报） ====================
 def generate_summaries(health_items):
     """为待发送的热搜列表生成概述，返回带 topic（原话题）和 summary 的列表"""
     items_text = "\n".join([f"{item['rank']}. {item['title']}" for item in health_items])
@@ -173,7 +201,6 @@ def generate_summaries(health_items):
                         continue
                     summary = line.split('概述：')[1].strip()
                     results[rank] = summary
-            # 将概述合并回原条目
             for item in health_items:
                 item['summary'] = results.get(item['rank'], item['title'])
             return health_items
@@ -184,7 +211,7 @@ def generate_summaries(health_items):
         print(f"生成概述异常: {e}")
         return None
 
-# ==================== 4. 发送钉钉消息 ====================
+# ==================== 5. 发送钉钉消息 ====================
 def send_to_dingtalk(webhook_url, secret, title, text):
     timestamp = str(round(time.time() * 1000))
     secret_enc = secret.encode('utf-8')
@@ -213,7 +240,6 @@ if __name__ == "__main__":
         print("未获取到热搜数据，退出。")
         exit(1)
 
-    # 筛选健康话题
     health_items = []
     for item in hotspots:
         title = item['title']
@@ -227,7 +253,6 @@ if __name__ == "__main__":
             print("  ❌ 拒绝")
     print(f"共筛选出 {len(health_items)} 条健康热搜")
 
-    # 读取钉钉凭证（汇总模式需要）
     webhooks_str = os.environ.get('DINGTALK_WEBHOOKS', '')
     secrets_str = os.environ.get('DINGTALK_SECRETS', '')
     webhooks = [w.strip() for w in webhooks_str.split(',') if w.strip()]
@@ -236,12 +261,9 @@ if __name__ == "__main__":
     if RUN_MODE == 'collect':
         # ---------- 采集模式 ----------
         if health_items:
-            # 标题标准化
             for item in health_items:
                 item['title'] = ' '.join(item['title'].split())
-            # 加载现有待发池，合并新数据
             pending = load_pending()
-            # 用 title 做简单的去重（保留最新 rank/url）
             pending_dict = {p['title']: p for p in pending}
             for item in health_items:
                 pending_dict[item['title']] = item
@@ -262,9 +284,7 @@ if __name__ == "__main__":
             for i in range(len(webhooks)):
                 send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", "暂时没最新消息，等待下次更新。")
         else:
-            # 加载已发送集合
             sent_set = load_json_set(SENT_FILE)
-            # 过滤掉已发送的话题
             new_items = [item for item in pending if item['title'] not in sent_set]
             if not new_items:
                 print("待发池中的话题均已发送过，发送提示。")
@@ -272,20 +292,19 @@ if __name__ == "__main__":
                     send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", "暂时没最新消息，等待下次更新。")
             else:
                 print(f"待发池共 {len(pending)} 条，其中 {len(new_items)} 条为新增。")
-                # 生成概述
+                # 生成概述并发送主健康播报
                 summarized = generate_summaries(new_items)
                 if summarized:
                     messages = []
                     for item in summarized:
                         rank = item.get('rank', '?')
-                        title = item['title']                     # 原话题
+                        title = item['title']
                         summary = item.get('summary', item['title'])
                         weibo_query = urllib.parse.quote(title)
                         link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
                         messages.append(f"话题：{title}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
                     full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
                 else:
-                    # 回退：无概述，直接显示标题
                     messages = []
                     for item in new_items:
                         rank = item.get('rank', '?')
@@ -295,21 +314,41 @@ if __name__ == "__main__":
                         messages.append(f"话题：{title}\n排位：{rank}\n概述：{title}\n链接：{link}\n")
                     full_text = f"## 微博健康热搜播报\n\n" + "\n".join(messages)
 
-                # 发送到所有群
                 for i in range(len(webhooks)):
                     send_to_dingtalk(webhooks[i], secrets[i], "健康热搜", full_text)
 
-                # 更新已发送集合
+                # ---------- 豆包专项：筛选并单独推送 ----------
+                doubao_items = []
+                for item in new_items:
+                    if is_doubao_related(item['title']):
+                        doubao_items.append(item)
+                if doubao_items:
+                    doubao_summarized = generate_summaries(doubao_items)
+                    if doubao_summarized:
+                        doubao_messages = []
+                        for item in doubao_summarized:
+                            rank = item.get('rank', '?')
+                            title = item['title']
+                            summary = item.get('summary', item['title'])
+                            weibo_query = urllib.parse.quote(title)
+                            link = f"https://s.weibo.com/weibo?q={weibo_query}&t=31&band_rank={rank}&Refer=top"
+                            doubao_messages.append(f"话题：{title}\n排位：{rank}\n概述：{summary}\n链接：{link}\n")
+                        doubao_full_text = f"## 🤖 豆包相关健康话题\n\n" + "\n".join(doubao_messages)
+                        for i in range(len(webhooks)):
+                            send_to_dingtalk(webhooks[i], secrets[i], "豆包健康话题", doubao_full_text)
+                        print(f"豆包专项：推送了 {len(doubao_items)} 条相关话题。")
+                # ------------------------------------------------
+
+                # 更新已发送集合和日累积
                 sent_set.update(item['title'] for item in new_items)
                 save_json_set(SENT_FILE, sent_set)
 
-                # 更新日累积文件
                 daily_set = load_json_set(DAILY_FILE)
                 daily_set.update(item['title'] for item in new_items)
                 save_json_set(DAILY_FILE, daily_set)
                 print(f"已更新日累积，当前共 {len(daily_set)} 个话题。")
 
-            # 无论是否发送，都清空待发池（避免旧数据堆积）
+            # 清空待发池
             clear_pending()
             print("已清空待发池。")
 
