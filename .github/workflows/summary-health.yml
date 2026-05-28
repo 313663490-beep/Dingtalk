@@ -1,0 +1,39 @@
+name: 健康热搜汇总播报（每60分钟）
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 汇总并推送
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DINGTALK_WEBHOOKS: "${{ secrets.DINGTALK_WEBHOOK }},${{ secrets.DINGTALK_WEBHOOK_GROUP2 }}"
+          DINGTALK_SECRETS: "${{ secrets.DINGTALK_SECRET }},${{ secrets.DINGTALK_SECRET_GROUP2 }}"
+          RUN_MODE: summary
+          PENDING_FILE: pending_health.json
+          SENT_TOPICS_FILE: sent_topics_common.json
+          DAILY_FILE: daily_health_topics.json
+        run: python scripts/weibo_health_ai.py
+
+      - name: 提交状态文件
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pending_health.json sent_topics_common.json daily_health_topics.json
+          git diff --staged --quiet || git commit -m "汇总播报后更新状态 [skip ci]"
+          git pull --rebase origin main
+          git push
