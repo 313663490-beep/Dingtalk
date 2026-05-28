@@ -1,0 +1,35 @@
+name: 健康热搜采集（每30分钟）
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 采集健康热搜
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          RUN_MODE: collect
+          PENDING_FILE: pending_health.json
+        run: python scripts/weibo_health_ai.py
+
+      - name: 提交待发池
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pending_health.json
+          git diff --staged --quiet || git commit -m "更新健康待发池 [skip ci]"
+          git pull --rebase origin main
+          git push
