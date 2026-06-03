@@ -20,6 +20,7 @@ jobs:
       - name: 推送待发帖到钉钉
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          UAPIS_API_KEY: ${{ secrets.UAPIS_API_KEY }}   # 添加这一行
           DINGTALK_WEBHOOK_XHS: ${{ secrets.DINGTALK_WEBHOOK_XHS }}
           DINGTALK_SECRET_XHS: ${{ secrets.DINGTALK_SECRET_XHS }}
           XHS_KEYWORDS: ${{ secrets.XHS_KEYWORDS }}
