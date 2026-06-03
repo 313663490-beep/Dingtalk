@@ -20,6 +20,7 @@ jobs:
       - name: 搜索并筛选健康帖
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          UAPIS_API_KEY: ${{ secrets.UAPIS_API_KEY }}   # 添加这一行
           XHS_KEYWORDS: ${{ secrets.XHS_KEYWORDS }}
           RUN_MODE: collect
         run: python scripts/xiaohongshu_health_monitor.py
