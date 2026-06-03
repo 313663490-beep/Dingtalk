@@ -6,9 +6,9 @@ import hashlib
 import base64
 import urllib.parse
 import json
-import xml.etree.ElementTree as ET
 
 # ==================== 配置 ====================
+UAPIS_API_KEY = os.environ.get('UAPIS_API_KEY', '')
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 HEADERS_DEEPSEEK = {
@@ -16,64 +16,52 @@ HEADERS_DEEPSEEK = {
     "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
 }
 
-# 关键词（环境变量，逗号分隔）
-KEYWORDS = [k.strip() for k in os.environ.get('XHS_KEYWORDS', '健康,医疗,养生').split(',') if k.strip()]
-
-# RSSHub 公共实例（如自建可更换）
-RSSHUB_BASE = "https://rsshub.app"
-SEARCH_ROUTE = "/xiaohongshu/search/keyword/"
+# 小红书热榜接口
+XHS_HOTBOARD_URL = "https://uapis.cn/api/v1/misc/hotboard"
 
 # 状态文件
 LAST_CAPTURE_FILE = "xhs_last_capture.json"
 PENDING_FILE = "xhs_pending.json"
 SENT_FILE = "xhs_sent.json"
 
-def get_rss_items(keyword):
-    """通过 RSSHub 获取小红书搜索结果，返回帖子列表"""
-    url = f"{RSSHUB_BASE}{SEARCH_ROUTE}{urllib.parse.quote(keyword)}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+def get_xiaohongshu_hotboard():
+    """从UAPIS获取小红书热榜"""
+    if not UAPIS_API_KEY:
+        print("未配置 UAPIS_API_KEY")
+        return []
+    headers = {"API-Key": UAPIS_API_KEY}
+    params = {"type": "xiaohongshu"}
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(XHS_HOTBOARD_URL, headers=headers, params=params, timeout=15)
         if resp.status_code == 200:
-            root = ET.fromstring(resp.content)
-            items = []
-            for item in root.iter('item'):
-                title = item.find('title').text.strip() if item.find('title') is not None else ''
-                link = item.find('link').text.strip() if item.find('link') is not None else ''
-                desc = item.find('description').text.strip() if item.find('description') is not None else ''
-                # 从链接提取 note_id
-                note_id = ''
-                if '/explore/' in link:
-                    note_id = link.split('/explore/')[-1].split('?')[0]
-                elif '/discovery/item/' in link:
-                    note_id = link.split('/discovery/item/')[-1].split('?')[0]
-                # 尝试从描述中提取互动数据（格式如 "点赞 100" 等）
-                liked = 0
-                collected = 0
-                comments = 0
-                if '点赞' in desc:
-                    try:
-                        liked = int(desc.split('点赞')[1].split()[0].replace(',', ''))
-                    except:
-                        pass
-                items.append({
-                    'note_id': note_id,
-                    'title': title,
-                    'url': link,
-                    'author': '',
-                    'liked_count': liked,
-                    'collected_count': collected,
-                    'comments_count': comments,
-                    'keyword': keyword
-                })
-            return items
+            data = resp.json()
+            if data.get('code') == 200 and 'data' in data and 'list' in data['data']:
+                hot_list = data['data']['list']
+                posts = []
+                for idx, item in enumerate(hot_list, start=1):
+                    title = item.get('title', '').strip()
+                    if not title:
+                        continue
+                    url = item.get('url', '')
+                    note_id = item.get('id', '') or url.split('/')[-1]  # 尝试提取ID
+                    if not note_id:
+                        note_id = hashlib.md5(title.encode()).hexdigest()  # 临时ID
+                    posts.append({
+                        'note_id': note_id,
+                        'title': title,
+                        'url': url,
+                        'hot_value': item.get('hot_value', 0),
+                        'rank': idx
+                    })
+                return posts
+            else:
+                print(f"UAPIS 返回异常: {data}")
+                return []
         else:
-            print(f"RSSHub 返回 {resp.status_code}: {resp.text[:200]}")
+            print(f"UAPIS 请求失败: {resp.status_code}")
             return []
     except Exception as e:
-        print(f"RSSHub 请求异常: {e}")
+        print(f"获取小红书热榜异常: {e}")
         return []
 
 def load_json_set(filename):
@@ -106,10 +94,9 @@ def save_pending(items):
 def clear_pending():
     save_pending([])
 
-def is_health_topic(title, author):
-    prompt = f"""请判断以下小红书帖子是否属于健康/医疗/养生/科学育儿等相关话题。
-帖子标题：{title}
-作者：{author if author else '未知'}
+def is_health_topic(title):
+    prompt = f"""请判断以下小红书帖子标题是否属于健康/医疗/养生/科学育儿等相关话题。
+标题：{title}
 健康话题包括：疾病科普、就医经历、用药分享、症状讨论、养生方法、减肥经验、心理健康、医疗政策讨论、母婴育儿健康等。
 不包括：纯商业广告（无实质健康内容）、娱乐八卦、明星日常、美食探店（非健康饮食类）、宠物日常（除非涉及人畜共患病）。
 请只回答一个字：是 或 否。"""
@@ -154,46 +141,43 @@ def send_to_dingtalk(webhook_url, secret, title, text):
 # ==================== 主程序 ====================
 if __name__ == "__main__":
     RUN_MODE = os.environ.get('RUN_MODE', 'collect')
-    print(f"当前模式：{RUN_MODE}，关键词：{KEYWORDS}")
+    print(f"当前模式：{RUN_MODE}")
 
     if RUN_MODE == 'collect':
         # ---------- 采集模式 ----------
+        print("获取小红书热榜...")
+        posts = get_xiaohongshu_hotboard()
+        print(f"获取到 {len(posts)} 条热帖")
+
         last_ids = load_json_set(LAST_CAPTURE_FILE)
         current_ids = set()
         new_posts = []
 
-        for keyword in KEYWORDS:
-            print(f"搜索关键词: {keyword}")
-            posts = get_rss_items(keyword)
-            print(f"  获取到 {len(posts)} 条帖子")
-            for post in posts:
-                if not post['note_id']:
-                    continue
-                current_ids.add(post['note_id'])
-                if post['note_id'] not in last_ids:
-                    new_posts.append(post)
-            time.sleep(3)  # 遵守 RSSHub 公共实例频率
+        for post in posts:
+            if not post['note_id']:
+                continue
+            current_ids.add(post['note_id'])
+            if post['note_id'] not in last_ids:
+                new_posts.append(post)
 
-        print(f"本次共抓取 {len(current_ids)} 条帖子，其中 {len(new_posts)} 条为新增。")
+        print(f"其中 {len(new_posts)} 条为新上榜帖子")
 
         health_posts = []
         for post in new_posts:
-            title = post['title']
-            author = post['author']
-            print(f"判断: [{author}] {title}")
-            if is_health_topic(title, author):
+            print(f"判断: {post['title']}")
+            if is_health_topic(post['title']):
                 health_posts.append(post)
                 print("  ✅ 通过")
             else:
                 print("  ❌ 拒绝")
 
-        print(f"新增帖子中有 {len(health_posts)} 条为健康话题。")
+        print(f"健康热帖：{len(health_posts)} 条")
 
         if health_posts:
             pending = load_pending()
             pending.extend(health_posts)
             save_pending(pending)
-            print(f"已存入待发池，当前共 {len(pending)} 条待发帖。")
+            print(f"已存入待发池，当前共 {len(pending)} 条。")
 
         save_json_set(LAST_CAPTURE_FILE, current_ids)
         print("已更新抓取记录。")
@@ -203,42 +187,30 @@ if __name__ == "__main__":
         webhook_url = os.environ.get('DINGTALK_WEBHOOK_XHS')
         secret = os.environ.get('DINGTALK_SECRET_XHS')
         if not webhook_url or not secret:
-            print("钉钉凭证缺失，无法发送")
+            print("钉钉凭证缺失")
             exit(1)
 
         pending = load_pending()
         if not pending:
-            print("待发池为空，发送提示。")
-            send_to_dingtalk(webhook_url, secret, "小红书健康监测", "暂无新发现的健康热帖，等待下次更新。")
+            send_to_dingtalk(webhook_url, secret, "小红书健康热帖", "暂无新发现的健康热帖，等待下次更新。")
         else:
             sent_ids = load_json_set(SENT_FILE)
             new_items = [item for item in pending if item['note_id'] not in sent_ids]
             if not new_items:
-                print("无新帖，发送提示。")
-                send_to_dingtalk(webhook_url, secret, "小红书健康监测", "暂无新发现的健康热帖，等待下次更新。")
+                send_to_dingtalk(webhook_url, secret, "小红书健康热帖", "暂无新发现的健康热帖，等待下次更新。")
             else:
-                print(f"待发池 {len(pending)} 条，其中新帖 {len(new_items)} 条。")
                 messages = []
                 for item in new_items:
                     title = item['title']
-                    author = item.get('author', '未知')
-                    like = item.get('liked_count', 0)
-                    collect = item.get('collected_count', 0)
-                    comment = item.get('comments_count', 0)
-                    url = item['url']
-                    messages.append(
-                        f"**{title}**\n"
-                        f"👤 {author}  |  ❤️ {like}  ⭐ {collect}  💬 {comment}\n"
-                        f"[查看原文]({url})\n"
-                    )
+                    url = item.get('url', '')
+                    hot = item.get('hot_value', item.get('rank', '?'))
+                    messages.append(f"**{title}**\n🔥 热度：{hot}\n[查看原文]({url})\n")
                 full_text = f"## 📕 小红书健康热帖\n\n" + "\n".join(messages)
                 send_to_dingtalk(webhook_url, secret, "小红书健康热帖", full_text)
 
-                # 更新已发送集合
                 sent_ids.update(item['note_id'] for item in new_items)
                 save_json_set(SENT_FILE, sent_ids)
 
-            # 清空待发池
             clear_pending()
             print("已清空待发池。")
     else:
